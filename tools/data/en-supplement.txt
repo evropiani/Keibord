@@ -1,0 +1,14 @@
+# English supplement for Resources/Dictionaries/en-GB.kbdl and en-US.kbdl (tools/build_dictionaries.py).
+#
+# Format: <word> <zipf> [<spelling> ...]
+#   zipf = log10 occurrences per billion words ("the" ~ 7.5, a rare word ~ 1.5). The word is added
+#   with exactly this casing; if the corpus already has the word, the higher zipf wins.
+#   Optional spellings (lookup keys) are absorbed: they are removed from the dictionary so the
+#   keyboard corrects them to the word.
+
+# Hunspell only knows "OK"; chat spelling keeps the lower-case word as well.
+ok 5.5
+
+# "cant" (jargon) and "wont" (habit) are real but rare; typed, they nearly always mean the contraction.
+can't 6.0 cant
+won't 5.5 wont

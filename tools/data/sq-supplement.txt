@@ -1,0 +1,123 @@
+# Albanian supplement for Resources/Dictionaries/sq.kbdl (tools/build_dictionaries.py).
+#
+# Format: <word> <zipf> [<spelling> ...]
+#   zipf = log10 occurrences per billion words ("të" ~ 7.7, a rare word ~ 1.5). The word is added
+#   with exactly this casing; if the corpus already has it, the higher zipf wins.
+#   Optional spellings (lookup keys) are absorbed: they are removed from the dictionary so the
+#   keyboard corrects them to the word (accent restoration for "kosove" -> "Kosovë").
+# The OpenSubtitles corpus has few place names; these values are hand-tuned estimates.
+# Reference corpus values: Amerikë 4.53, Francë 4.22, Gjermani 4.02, Shqipëri 3.20.
+
+# Kosovo
+Kosovë 3.9 kosove
+Kosova 3.8
+Kosovës 3.6 kosoves
+Kosovën 3.0 kosoven
+Prishtinë 3.6 prishtine
+Prishtina 3.5
+Prishtinës 3.2 prishtines
+Prizren 3.2
+Prizreni 2.9
+Prizrenit 2.6
+Pejë 3.0 peje
+Peja 2.9
+Pejës 2.5 pejes
+Gjakovë 3.0 gjakove
+Gjakova 2.9
+Gjakovës 2.5 gjakoves
+Ferizaj 2.9
+Ferizaji 2.5
+Mitrovicë 3.0 mitrovice
+Mitrovica 2.9
+Mitrovicës 2.5 mitrovices
+Gjilan 2.9
+Gjilani 2.6
+Podujevë 2.7 podujeve
+Podujeva 2.6
+Vushtrri 2.6
+Drenas 2.5
+Skënderaj 2.5 skenderaj
+Malishevë 2.4 malisheve
+Suharekë 2.4 suhareke
+Rahovec 2.4
+Lipjan 2.4
+Deçan 2.4 decan
+Istog 2.3
+Klinë 2.3
+Kamenicë 2.3 kamenice
+Dragash 2.3
+Kaçanik 2.3 kacanik
+Shtime 2.2
+Obiliq 2.2
+Graçanicë 2.2 gracanice
+Dardani 2.4
+Dardania 2.4
+
+# Albania and the region
+Shqipëri 3.6 shqiperi
+Shqipëria 3.6 shqiperia
+Shqipërisë 3.3 shqiperise
+Shqipërinë 3.0 shqiperine
+Tiranë 3.6 tirane
+Tirana 3.5
+Tiranës 3.2 tiranes
+Durrës 3.1 durres
+Durrësi 2.8 durresi
+Shkodër 3.0 shkoder
+Shkodra 2.9
+Vlorë 3.0 vlore
+Vlora 2.9
+Elbasan 2.7
+Elbasani 2.5
+Korçë 2.9 korce
+Korça 2.8 korca
+Berat 2.6
+Fier 2.6
+Sarandë 2.7 sarande
+Saranda 2.6
+Gjirokastër 2.5 gjirokaster
+Kukës 2.4 kukes
+Lezhë 2.4 lezhe
+Tetovë 2.7 tetove
+Tetova 2.6
+Shkup 2.9
+Shkupi 2.6
+Ulqin 2.5
+Ulqini 2.3
+Preshevë 2.4 presheve
+Presheva 2.3
+Maqedoni 3.0
+Ballkan 2.8
+Ballkani 2.7
+Evropë 4.0
+Evropa 3.8
+Europë 3.4
+Europa 3.4
+Gjermani 4.0
+Gjermania 3.8
+Zvicër 3.8 zvicer
+Zvicra 3.5
+Austri 3.3
+Austria 3.3
+Vjenë 3.0 vjene
+Vjena 2.9
+
+# People, language
+shqiptar 3.6
+shqiptare 3.6
+shqiptarë 3.5
+shqiptarët 3.4 shqiptaret
+kosovar 3.2
+kosovare 3.1
+kosovarë 3.0
+kosovarët 2.9 kosovaret
+prishtinas 2.3
+tiranas 2.3
+shqip 4.5
+
+# Kosovo colloquial
+hajt 3.9
+qysh 4.2
+tash 5.0
+osht 3.3
+asht 3.1

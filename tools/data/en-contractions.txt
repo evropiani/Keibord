@@ -1,0 +1,105 @@
+# English contractions for tools/build_dictionaries.py.
+#
+# The OpenSubtitles word counts (FrequencyWords) split "don't" into the tokens "don" and "'t",
+# so the builder reconstructs a count for every contraction listed here:
+#
+#   <contraction> stem          count = count of the stem token (the part before the apostrophe),
+#                               which only occurs as part of this contraction ("didn", "isn", ...)
+#   <contraction> share <w>     count = w x (count of the suffix token ("'t", "'s", ...) minus the
+#                               counts already taken by "stem" lines with the same suffix)
+#
+# Afterwards each contraction's count is subtracted from its stem token ("i", "let", "can", ...),
+# so "let" is not inflated by "let's". Weights are rough shares of the suffix in conversational
+# English; "'s" keeps ~20 % for possessives. A contraction that the variant's Hunspell rejects is
+# not added to that dictionary.
+
+# n't
+don't        stem
+didn't       stem
+doesn't      stem
+isn't        stem
+wasn't       stem
+wouldn't     stem
+haven't      stem
+couldn't     stem
+aren't       stem
+ain't        stem
+shouldn't    stem
+weren't      stem
+hasn't       stem
+hadn't       stem
+mustn't      stem
+needn't      stem
+shan't       stem
+can't        share 0.73
+won't        share 0.27
+
+# 'm
+I'm          share 1.0
+
+# 're
+you're       share 0.52
+we're        share 0.27
+they're      share 0.20
+what're      share 0.005
+
+# 'll
+I'll         share 0.48
+we'll        share 0.14
+you'll       share 0.13
+he'll        share 0.06
+they'll      share 0.05
+it'll        share 0.035
+she'll       share 0.03
+that'll      share 0.025
+there'll     share 0.005
+who'll       share 0.003
+
+# 've
+I've         share 0.52
+you've       share 0.18
+we've        share 0.14
+they've      share 0.07
+could've     share 0.02
+would've     share 0.02
+should've    share 0.017
+must've      share 0.01
+might've     share 0.005
+who've       share 0.003
+
+# 'd
+I'd          share 0.42
+you'd        share 0.16
+he'd         share 0.11
+we'd         share 0.08
+she'd        share 0.06
+they'd       share 0.06
+it'd         share 0.025
+who'd        share 0.015
+that'd       share 0.015
+there'd      share 0.005
+
+# 's (contractions of is/has/us; the rest of "'s" are possessives)
+it's         share 0.22
+that's       share 0.15
+he's         share 0.09
+what's       share 0.08
+let's        share 0.065
+there's      share 0.06
+she's        share 0.045
+here's       share 0.027
+who's        share 0.022
+where's      share 0.018
+how's        share 0.009
+everything's share 0.004
+nothing's    share 0.003
+something's  share 0.003
+everyone's   share 0.003
+somebody's   share 0.002
+someone's    share 0.002
+
+# others
+o'clock      share 1.0
+ma'am        share 0.95
+y'all        share 0.9
+c'mon        share 0.95
