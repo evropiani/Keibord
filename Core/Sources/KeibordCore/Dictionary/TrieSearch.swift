@@ -46,36 +46,86 @@ extension TrieNodeAccess {
 }
 
 /// Lookup-key helpers shared by the builder and the searches.
+///
+/// Fast path: every scalar below U+0300 is NFC-stable with combining class 0 and lower-cases to a
+/// single unit (except U+0130 "İ"), and "’" is NFC-stable too. Text made only of those units is
+/// therefore already NFC and its lookup key is a per-unit mapping, without Foundation. Anything
+/// else goes through `TextUnits.lookupKey` (tests check both paths agree).
 enum LexiconKey {
+    /// Lower-case unit for units below 0x300; `noFastPath` where the mapping is not a single unit.
+    private static let lowerTable: [UInt16] = (0..<0x300).map { value in
+        guard let scalar = Unicode.Scalar(UInt32(value)) else { return noFastPath }
+        let lower = Array(String(Character(scalar)).lowercased().utf16)
+        return lower.count == 1 ? lower[0] : noFastPath
+    }
+    private static let noFastPath: UInt16 = 0xFFFF
+
     /// UTF-16 units of `TextUnits.lookupKey(text)`, or nil when the key contains non-BMP characters.
     static func units(_ text: String) -> [UInt16]? {
-        var result: [UInt16] = []
-        result.reserveCapacity(text.utf8.count)
-        for byte in text.utf8 {
-            guard byte < 0x80 else { return slowUnits(text) }
-            result.append(UInt16(byte >= 0x41 && byte <= 0x5A ? byte + 0x20 : byte))
-        }
-        return result
+        var text = text
+        return text.withUTF8(fastUnits) ?? slowUnits(text)
     }
 
-    private static func slowUnits(_ text: String) -> [UInt16]? {
+    /// Lookup-key units of UTF-8 text made only of U+0000…U+02FF (1 or 2 bytes, except "İ") and "’"
+    /// (E2 80 99), or nil for any other text.
+    private static func fastUnits(_ bytes: UnsafeBufferPointer<UInt8>) -> [UInt16]? {
+        let table = lowerTable
+        var supported = true
+        let result = [UInt16](unsafeUninitializedCapacity: bytes.count) { out, count in
+            var i = 0, n = 0
+            while i < bytes.count {
+                let b0 = bytes[i]
+                if b0 < 0x80 {
+                    out[n] = table[Int(b0)]
+                    i += 1
+                } else if b0 >= 0xC2, b0 < 0xCC, i + 1 < bytes.count {
+                    let lower = table[Int(b0 & 0x1F) << 6 | Int(bytes[i + 1] & 0x3F)]
+                    if lower == noFastPath {
+                        supported = false
+                        break
+                    }
+                    out[n] = lower
+                    i += 2
+                } else if b0 == 0xE2, i + 2 < bytes.count, bytes[i + 1] == 0x80, bytes[i + 2] == 0x99 {
+                    out[n] = 0x27
+                    i += 3
+                } else {
+                    supported = false
+                    break
+                }
+                n += 1
+            }
+            count = supported ? n : 0
+        }
+        return supported ? result : nil
+    }
+
+    static func slowUnits(_ text: String) -> [UInt16]? {
         let units = Array(TextUnits.lookupKey(text).utf16)
         return units.contains(where: isSurrogate) ? nil : units
     }
 
     /// The word in NFC (stored form of dictionary words).
     static func nfc(_ word: String) -> String {
-        word.utf8.allSatisfy { $0 < 0x80 } ? word : word.precomposedStringWithCanonicalMapping
+        var word = word
+        let isNFC = word.withUTF8 { bytes -> Bool in
+            var i = 0
+            while i < bytes.count {
+                // Lead bytes ≥ 0xCC start scalars ≥ U+0300 (continuation bytes are < 0xC0).
+                if bytes[i] >= 0xCC {
+                    guard bytes[i] == 0xE2, i + 2 < bytes.count, bytes[i + 1] == 0x80, bytes[i + 2] == 0x99 else { return false }
+                    i += 2
+                }
+                i += 1
+            }
+            return true
+        }
+        return isNFC ? word : word.precomposedStringWithCanonicalMapping
     }
 
     /// The single key unit of a tap candidate character (lower-cased, `’` → `'`), or nil if the
     /// character does not map to exactly one BMP unit.
     static func tapUnit(_ character: String) -> UInt16? {
-        var iterator = character.utf16.makeIterator()
-        if let u = iterator.next(), iterator.next() == nil {
-            if u < 0x80 { return u >= 0x41 && u <= 0x5A ? u + 0x20 : u }
-            if u == 0x2019 { return 0x27 }
-        }
         guard let units = units(character), units.count == 1 else { return nil }
         return units[0]
     }
@@ -99,6 +149,9 @@ enum LexiconKey {
 }
 
 /// Trie algorithms shared by `BinaryLexicon` and `InMemoryLexicon`.
+///
+/// The traversals visit every node at most once in a well-formed trie; they stop after `nodeCount`
+/// visits so a damaged file whose child ranges overlap cannot make them run for exponential time.
 enum TrieSearch {
     /// Node reached by following `units` from the root, if any.
     static func findNode<T: TrieNodeAccess>(_ trie: T, units: [UInt16]) -> Int? {
@@ -138,6 +191,7 @@ enum TrieSearch {
         var heap = LexiconMinHeap()
         heap.push(entry(trie.nodeMaxZipf(start), isWord: false, start))
         var result: [Int] = []
+        var budget = trie.nodeCount
         while let top = heap.pop() {
             let index = Int(top & 0x7FFF_FFFF_FFFF)
             if top & (1 << 47) != 0 {
@@ -145,6 +199,8 @@ enum TrieSearch {
                 if result.count == limit { break }
                 continue
             }
+            budget -= 1
+            if budget < 0 { break }
             for k in trie.values(of: index) {
                 let id = trie.value(at: k)
                 if id < trie.wordCount { heap.push(entry(trie.zipfByte(id), isWord: true, id)) }
@@ -183,7 +239,10 @@ enum TrieSearch {
     ///       row_j[i-1]     + deletion,                            // tap i is extra
     ///       row_{j-2}[i-2] + transposition + sub(i, L_{j-1}) + sub(i-1, L_j))
     /// `sub(i, L)` is the cheapest candidate c of tap i with c == L (c.cost) or base(c) == base(L)
-    /// (c.cost + diacritic), else `substitution`. Words are emitted at terminal nodes with `row_j[n]`.
+    /// (c.cost + diacritic), capped at `substitution`. The base rule covers both `FuzzyCostModel` cases
+    /// (word letter has a diacritic the user did not type, or the user typed a diacritic the word lacks)
+    /// and also two variants of one base ("perchè" for "perché"). `ins(L)` is `apostropheInsertion` for
+    /// "'" and "-", else `insertion`. Words are emitted at terminal nodes with `row_j[n]`.
     /// A subtree is pruned when min(row_j) and min(row_{j-1}) + transposition both exceed the bound:
     /// every deeper row is at least the smaller of the two (all costs are ≥ 0). The bound tightens to the
     /// current `limit`-th best cost once enough matches were found.
@@ -210,7 +269,10 @@ enum TrieSearch {
             depths.append(1)
         }
 
+        var budget = trie.nodeCount
         while let node = nodes.popLast() {
+            budget -= 1
+            if budget < 0 { break }
             let j = depths.removeLast()
             work.ensureDepth(j)
             let unit = trie.nodeUnit(node)

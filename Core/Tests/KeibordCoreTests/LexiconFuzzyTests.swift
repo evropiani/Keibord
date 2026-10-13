@@ -88,6 +88,20 @@ final class LexiconFuzzyTests: XCTestCase {
         }
     }
 
+    func testDiacriticVariantsAndUpperCaseTaps() throws {
+        for lexicon in try pair([("perché", 6), ("perche", 1), ("është", 6.9), ("città", 6), ("cittadino", 5)]) {
+            // Another variant of the same base letter costs one diacritic step (è typed for é).
+            XCTAssertEqual(result(lexicon, search(lexicon, "perchè", maxCost: 2)), ["perché": 2, "perche": 2])
+            XCTAssertEqual(search(lexicon, "perchè", maxCost: 2).first.map { lexicon.word($0.id) }, "perché")
+            XCTAssertEqual(result(lexicon, search(lexicon, "perché", maxCost: 2)), ["perché": 0, "perche": 2])
+            // Upper-case taps are lower-cased.
+            XCTAssertEqual(result(lexicon, search(lexicon, "ËSHTË", maxCost: 0)), ["është": 0])
+            XCTAssertEqual(search(lexicon, "ESHTE", maxCost: 4).first?.cost, 4)
+            // A missing final accent next to a longer completion.
+            XCTAssertEqual(result(lexicon, search(lexicon, "citta", maxCost: 2)), ["città": 2])
+        }
+    }
+
     func testTransposition() throws {
         for lexicon in try pair([("the", 7.7), ("then", 5), ("tea", 5), ("ten", 5), ("eh", 4)]) {
             let matches = search(lexicon, "teh")

@@ -5,7 +5,7 @@ import Foundation
 public enum LexiconBuilder {
     /// Builds a lexicon file.
     /// * Words are stored in NFC with their casing. Words whose lookup key is empty or contains non-BMP
-    ///   characters are dropped; identical words are merged (max zipf).
+    ///   characters are dropped; identical words are merged (max zipf). NaN frequencies count as 0.
     /// * Word ids follow descending zipf, ties in code point order.
     /// * Should a key have more than 255 casings or a node more than 255 children, the least frequent
     ///   words causing the overflow are dropped (never happens with real dictionaries).
@@ -75,6 +75,25 @@ public enum LexiconBuilder {
     }
 }
 
+/// A word known to be in NFC, hashed and compared by its UTF-8 bytes (much faster than `String`'s
+/// canonical-equivalence hashing for non-ASCII text, and equivalent for NFC strings).
+private struct NFCWord: Hashable {
+    let string: String
+
+    init(_ string: String) {
+        self.string = string
+    }
+
+    static func == (a: NFCWord, b: NFCWord) -> Bool {
+        a.string.utf8.count == b.string.utf8.count && a.string.utf8.elementsEqual(b.string.utf8)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        var string = string
+        string.withUTF8 { hasher.combine(bytes: UnsafeRawBufferPointer($0)) }
+    }
+}
+
 /// One trie node with the fields of the 12-byte `.kbdl` node record.
 struct LexiconNode: Hashable, Sendable {
     var firstChild: UInt32
@@ -98,147 +117,146 @@ struct LexiconTables: TrieNodeAccess, Sendable {
 
     init(languageID: String, entries: [(word: String, zipf: Double)], bigrams: [(previous: String, next: String, log2Prob: Double)]) {
         self.languageID = languageID
-        var _t = DispatchTime.now().uptimeNanoseconds
-        func lap(_ name: String) { let n = DispatchTime.now().uptimeNanoseconds; print("  [phase] \(name): \(Double(n - _t) / 1e6) ms"); _t = n }
 
-        // Normalise, drop unusable words, merge duplicates.
-        var items: [(word: String, zipf: Double, key: [UInt16])] = []
+        // Normalise, drop unusable words, merge duplicates (max zipf).
+        // Keys are concatenated in `keyUnits`; items refer to them by range.
+        var keyUnits: [UInt16] = []
+        var items: [(word: String, zipf: Double, key: Range<Int>)] = []
         items.reserveCapacity(entries.count)
-        var indexOfWord: [String: Int] = [:]
+        var indexOfWord: [NFCWord: Int] = [:]
         indexOfWord.reserveCapacity(entries.count)
         for entry in entries {
-            let word = LexiconKey.nfc(entry.word)
+            let word = NFCWord(LexiconKey.nfc(entry.word))
             let zipf = entry.zipf.isNaN ? 0 : entry.zipf
             if let i = indexOfWord[word] {
                 items[i].zipf = max(items[i].zipf, zipf)
                 continue
             }
-            guard let key = LexiconKey.units(word), !key.isEmpty else { continue }
+            guard let key = LexiconKey.units(word.string), !key.isEmpty else { continue }
             indexOfWord[word] = items.count
-            items.append((word, zipf, key))
+            items.append((word.string, zipf, keyUnits.count..<(keyUnits.count + key.count)))
+            keyUnits.append(contentsOf: key)
         }
 
-        lap("normalise")
         // Word ids: most frequent first, ties in code point (UTF-8 byte) order.
         items.sort { a, b in
             a.zipf != b.zipf ? a.zipf > b.zipf : a.word.utf8.lexicographicallyPrecedes(b.word.utf8)
         }
         if items.count > LexiconFormat.maxWordCount { items.removeLast(items.count - LexiconFormat.maxWordCount) }
-        zipf = items.map { LexiconFormat.zipfByte($0.zipf) }
-        lap("sort words")
 
-        while true {
-            let dropped = layoutTrie(keys: items.map(\.key))
-            if dropped.isEmpty { break }
-            let drop = Set(dropped)
-            items = items.enumerated().filter { !drop.contains($0.offset) }.map(\.element)
-            zipf = items.map { LexiconFormat.zipfByte($0.zipf) }
+        // Dropping the overflowing words cannot create a new overflow, so this normally runs twice at most.
+        var dropped = layoutTrie(keyUnits: keyUnits, keys: items.map(\.key))
+        while !dropped.isEmpty {
+            var keep = [Bool](repeating: true, count: items.count)
+            for id in dropped { keep[id] = false }
+            items = items.indices.filter { keep[$0] }.map { items[$0] }
+            dropped = layoutTrie(keyUnits: keyUnits, keys: items.map(\.key))
         }
-        lap("layout")
         words = items.map(\.word)
+        zipf = items.map { LexiconFormat.zipfByte($0.zipf) }
         computeMaxZipf()
-        lap("maxZipf")
         buildBigrams(bigrams)
-        lap("bigrams")
     }
 
-    /// Lays out the trie breadth-first. Returns the ids that must be dropped (node limits exceeded)
-    /// without finishing the layout, or [] on success.
-    private mutating func layoutTrie(keys: [[UInt16]]) -> [Int] {
-        // Flatten keys so sorting compares raw buffers.
-        var flat: [UInt16] = []
-        flat.reserveCapacity(keys.reduce(0) { $0 + $1.count })
-        var starts: [Int] = []
-        starts.reserveCapacity(keys.count + 1)
-        for key in keys {
-            starts.append(flat.count)
-            flat.append(contentsOf: key)
-        }
-        starts.append(flat.count)
-
-        // Ids sorted by key (UTF-16 unit order), then id; group equal keys.
-        var order = Array(0..<keys.count)
-        var groupStart: [Int] = []
-        flat.withUnsafeBufferPointer { f in
-            starts.withUnsafeBufferPointer { s in
-                func compare(_ a: Int, _ b: Int) -> Int {
-                    var i = s[a], k = s[b]
-                    let ea = s[a + 1], eb = s[b + 1]
-                    while i < ea, k < eb {
-                        if f[i] != f[k] { return f[i] < f[k] ? -1 : 1 }
-                        i += 1
-                        k += 1
-                    }
-                    return (ea - i) - (eb - k)
-                }
-                order.sort { a, b in
-                    let c = compare(a, b)
-                    return c != 0 ? c < 0 : a < b
-                }
-                for (i, id) in order.enumerated() where i == 0 || compare(order[i - 1], id) != 0 {
-                    groupStart.append(i)
-                }
-            }
-        }
-        groupStart.append(order.count)
-        let groupCount = groupStart.count - 1
-
+    /// Lays out the trie breadth-first for the keys `keyUnits[keys[id]]` and fills `nodes` and `values`.
+    /// Returns the ids that exceed the format limits (more than 255 words per key or children per node:
+    /// the least frequent are reported); the layout must then be redone without them.
+    ///
+    /// Works like an MSD radix sort: each node owns a contiguous range of `members` (the ids whose key
+    /// starts with the node's path), sorted by (unit at the node's depth, id), so ids ending at the node
+    /// come first (most frequent first) and every child's range is in id order again.
+    private mutating func layoutTrie(keyUnits: [UInt16], keys: [Range<Int>]) -> [Int] {
+        let count = keys.count
+        var nodes = [LexiconNode(firstChild: 0, unit: 0, childCount: 0, maxZipf: 0, valueRef: 0)]
+        nodes.reserveCapacity(count * 4)
+        // Member range of each node; a node's depth follows from its breadth-first level.
+        var spans: [(lo: UInt32, hi: UInt32)] = [(0, UInt32(count))]
+        spans.reserveCapacity(count * 4)
+        var values: [UInt32] = []
+        values.reserveCapacity(count)
         var dropped: [Int] = []
-        for g in 0..<groupCount where groupStart[g + 1] - groupStart[g] > LexiconFormat.maxWordsPerKey {
-            dropped.append(contentsOf: order[(groupStart[g] + LexiconFormat.maxWordsPerKey)..<groupStart[g + 1]])
+        // members: word ids, reordered per node. sorted: (code << 32 | id) of the current node's members,
+        // where code = 0 when the key ends at this depth, else unit + 1.
+        let members = UnsafeMutableBufferPointer<UInt32>.allocate(capacity: max(count, 1))
+        let sorted = UnsafeMutableBufferPointer<UInt64>.allocate(capacity: max(count, 1))
+        defer {
+            members.deallocate()
+            sorted.deallocate()
         }
-        if !dropped.isEmpty { return dropped }
+        for id in 0..<count { members[id] = UInt32(id) }
 
-        // Breadth-first: node p covers key groups lo..<hi sharing a prefix of length depth.
-        @inline(__always) func keyLength(_ g: Int) -> Int { let id = order[groupStart[g]]; return starts[id + 1] - starts[id] }
-        @inline(__always) func unit(_ g: Int, _ depth: Int) -> UInt16 { flat[starts[order[groupStart[g]]] + depth] }
-        nodes = [LexiconNode(firstChild: 0, unit: 0, childCount: 0, maxZipf: 0, valueRef: 0)]
-        values = []
-        values.reserveCapacity(order.count)
-        var ranges: [(lo: Int, hi: Int, depth: Int)] = [(0, groupCount, 0)]
-        var children: [(unit: UInt16, lo: Int, hi: Int)] = []
-        var p = 0
-        while p < nodes.count {
-            let (lo, hi, depth) = ranges[p]
-            var g = lo
-            if g < hi, keyLength(g) == depth {
-                let count = groupStart[g + 1] - groupStart[g]
-                nodes[p].valueRef = UInt32(count) << 24 | UInt32(values.count)
-                for k in groupStart[g]..<groupStart[g + 1] { values.append(UInt32(order[k])) }
-                g += 1
-            }
-            children.removeAll(keepingCapacity: true)
-            while g < hi {
-                let u = unit(g, depth)
-                var end = g + 1
-                while end < hi, unit(end, depth) == u { end += 1 }
-                children.append((u, g, end))
-                g = end
-            }
-            if children.count > LexiconFormat.maxChildren {
-                // Keep the children holding the most frequent words (smallest ids).
-                func minID(_ c: (unit: UInt16, lo: Int, hi: Int)) -> Int {
-                    (c.lo..<c.hi).map { order[groupStart[$0]] }.min() ?? Int.max
+        keyUnits.withUnsafeBufferPointer { flat in
+            keys.withUnsafeBufferPointer { keys in
+                var depth = 0
+                var levelEnd = 1
+                var p = 0
+                while p < nodes.count {
+                    if p == levelEnd {
+                        depth += 1
+                        levelEnd = nodes.count
+                    }
+                    let lo = Int(spans[p].lo), n = Int(spans[p].hi) - lo
+                    for k in 0..<n {
+                        let id = Int(members[lo + k])
+                        let key = keys[id]
+                        let code: UInt64 = key.count == depth ? 0 : UInt64(flat[key.lowerBound + depth]) + 1
+                        sorted[k] = code << 32 | UInt64(id)
+                    }
+                    if n > 1 {
+                        var run = UnsafeMutableBufferPointer(rebasing: sorted[0..<n])
+                        run.sort()
+                        for k in 0..<n { members[lo + k] = UInt32(truncatingIfNeeded: sorted[k]) }
+                    }
+
+                    var k = 0
+                    while k < n, sorted[k] >> 32 == 0 { k += 1 }
+                    if k > 0 {
+                        let stored = min(k, LexiconFormat.maxWordsPerKey)
+                        nodes[p].valueRef = UInt32(stored) << 24 | UInt32(values.count)
+                        values.append(contentsOf: members[lo..<(lo + stored)])
+                        if stored < k { dropped.append(contentsOf: members[(lo + stored)..<(lo + k)].map(Int.init)) }
+                    }
+
+                    // Children: runs of equal codes, in unit order.
+                    let firstChild = nodes.count
+                    while k < n {
+                        let code = sorted[k] >> 32
+                        let start = k
+                        k += 1
+                        while k < n, sorted[k] >> 32 == code { k += 1 }
+                        nodes.append(LexiconNode(firstChild: 0, unit: UInt16(code - 1), childCount: 0, maxZipf: 0, valueRef: 0))
+                        spans.append((UInt32(lo + start), UInt32(lo + k)))
+                    }
+                    let childCount = nodes.count - firstChild
+                    if childCount > LexiconFormat.maxChildren {
+                        // Keep the children holding the most frequent words (each range starts with its smallest id).
+                        let ranked = (firstChild..<nodes.count).map { (node: nodes[$0], span: spans[$0]) }
+                            .sorted { members[Int($0.span.lo)] < members[Int($1.span.lo)] }
+                        nodes.removeLast(childCount)
+                        spans.removeLast(childCount)
+                        for c in ranked.dropFirst(LexiconFormat.maxChildren) {
+                            dropped.append(contentsOf: members[Int(c.span.lo)..<Int(c.span.hi)].map(Int.init))
+                        }
+                        for c in ranked.prefix(LexiconFormat.maxChildren).sorted(by: { $0.node.unit < $1.node.unit }) {
+                            nodes.append(c.node)
+                            spans.append(c.span)
+                        }
+                    }
+                    if nodes.count > firstChild {
+                        nodes[p].firstChild = UInt32(firstChild)
+                        nodes[p].childCount = UInt8(nodes.count - firstChild)
+                    }
+                    p += 1
                 }
-                for c in children.sorted(by: { minID($0) < minID($1) }).dropFirst(LexiconFormat.maxChildren) {
-                    dropped.append(contentsOf: order[groupStart[c.lo]..<groupStart[c.hi]])
-                }
-                return dropped
             }
-            if !children.isEmpty {
-                nodes[p].firstChild = UInt32(nodes.count)
-                nodes[p].childCount = UInt8(children.count)
-                for c in children {
-                    nodes.append(LexiconNode(firstChild: 0, unit: c.unit, childCount: 0, maxZipf: 0, valueRef: 0))
-                    ranges.append((c.lo, c.hi, depth + 1))
-                }
-            }
-            p += 1
         }
-        return []
+        self.nodes = nodes
+        self.values = values
+        return dropped
     }
 
     private mutating func computeMaxZipf() {
+        // Children follow their parent, so a reverse pass sees every subtree before its root.
         for p in stride(from: nodes.count - 1, through: 0, by: -1) {
             var m: UInt8 = 0
             for k in values(of: p) { m = max(m, zipf[Int(values[k])]) }

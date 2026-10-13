@@ -133,6 +133,61 @@ final class LexiconTests: XCTestCase {
         }
     }
 
+    func testNonASCIINormalisation() throws {
+        // Decomposed input is stored in NFC and found by its precomposed key; upper-case diacritics fold.
+        let entries: [(word: String, zipf: Double)] = [("O\u{308}sterreich", 5), ("Österreich", 4), ("ËSHTË", 3), ("İstanbul", 4), ("Straße", 4)]
+        for lexicon in try pair(entries) {
+            XCTAssertEqual(lexicon.wordCount, 4)
+            XCTAssertEqual(LexiconTestData.words(lexicon, lexicon.lookup(key: "österreich")), ["Österreich"])
+            XCTAssertEqual(lexicon.zipf(try XCTUnwrap(lexicon.lookup(key: "österreich").first)), 5)
+            XCTAssertEqual(LexiconTestData.words(lexicon, lexicon.lookup(key: "ËSHTË")), ["ËSHTË"])
+            XCTAssertEqual(LexiconTestData.words(lexicon, lexicon.lookup(key: "straße")), ["Straße"])
+            // "İ" lower-cases to "i" + U+0307, exactly like `TextUnits.lookupKey`.
+            XCTAssertEqual(LexiconTestData.words(lexicon, lexicon.lookup(key: TextUnits.lookupKey("İstanbul"))), ["İstanbul"])
+            XCTAssertEqual(lexicon.lookup(key: "istanbul"), [])
+        }
+    }
+
+    func testLookupKeyFastPathMatchesTextUnits() {
+        func expected(_ s: String) -> [UInt16]? {
+            let units = Array(TextUnits.lookupKey(s).utf16)
+            return units.contains { $0 & 0xF800 == 0xD800 } ? nil : units
+        }
+        for value in UInt32(0)..<0x300 {
+            let s = String(Character(Unicode.Scalar(value)!))
+            XCTAssertEqual(LexiconKey.units(s), expected(s), "U+\(String(value, radix: 16))")
+            XCTAssertEqual(Array(LexiconKey.nfc(s).unicodeScalars), Array(s.precomposedStringWithCanonicalMapping.unicodeScalars))
+        }
+        let samples = ["", "Haus", "ÄRGER", "don’t", "DON’T", "O\u{308}l", "e\u{301}", "İstanbul", "ΟΔΟΣ", "Ǆemal", "ǅ", "Москва",
+                       "a😀", "😀", "’", "\u{2019}s", "x\u{2018}y", "Ⓐ", "ﬁ", "ẞ", "Ω", "Å", "e\u{301}\u{2019}", "\u{1E9E}x"]
+        var rng = LexiconTestRandom(seed: 21)
+        let alphabet: [Character] = Array("aZäÄßëËçÇéÉıİœŒǅ’'-ΣσЖ😀ﬁÅ") + ["e\u{301}", "\u{2019}", "Ⅻ"]
+        let random = (0..<400).map { _ in String((0..<Int.random(in: 1...6, using: &rng)).map { _ in alphabet.randomElement(using: &rng)! }) }
+        for s in samples + random {
+            XCTAssertEqual(LexiconKey.units(s), expected(s), s)
+            XCTAssertEqual(Array(LexiconKey.nfc(s).unicodeScalars), Array(s.precomposedStringWithCanonicalMapping.unicodeScalars), s)
+        }
+        XCTAssertEqual(LexiconKey.tapUnit("Ä"), 0xE4)
+        XCTAssertEqual(LexiconKey.tapUnit("’"), 0x27)
+        XCTAssertEqual(LexiconKey.tapUnit("-"), 0x2D)
+        XCTAssertNil(LexiconKey.tapUnit("ab"))
+        XCTAssertNil(LexiconKey.tapUnit(""))
+        XCTAssertNil(LexiconKey.tapUnit("😀"))
+        XCTAssertNil(LexiconKey.tapUnit("İ"))
+    }
+
+    func testBuildIsDeterministicAndIndependentOfInputOrder() {
+        var rng = LexiconTestRandom(seed: 17)
+        for _ in 0..<5 {
+            let entries = LexiconTestData.randomVocabulary(count: 300, rng: &rng)
+            let bigrams = LexiconTestData.randomBigrams(for: entries, count: 300, rng: &rng)
+            let data = LexiconBuilder.build(languageID: "x", entries: entries, bigrams: bigrams)
+            XCTAssertEqual(LexiconBuilder.build(languageID: "x", entries: entries, bigrams: bigrams), data)
+            XCTAssertEqual(LexiconBuilder.build(languageID: "x", entries: entries.shuffled(using: &rng), bigrams: bigrams.shuffled(using: &rng)), data)
+            XCTAssertEqual(InMemoryLexicon(languageID: "x", entries: entries.reversed(), bigrams: bigrams).serialized(), data)
+        }
+    }
+
     func testEmptyLexicon() throws {
         let data = LexiconBuilder.build(languageID: "empty", entries: [], bigrams: [])
         let stats = try LexiconFormat.validate(data)
@@ -238,6 +293,32 @@ final class LexiconTests: XCTestCase {
             XCTAssertEqual(lexicon.successors(of: habe, limit: 5).map(\.log2Prob), [0])
             XCTAssertEqual(LexiconTestData.words(lexicon, lexicon.successors(of: habe, limit: 5).map(\.id)), ["Hunger"])
             XCTAssertTrue(lexicon.successors(of: try XCTUnwrap(LexiconTestData.id(of: "gern", in: lexicon)), limit: 5).isEmpty)
+        }
+    }
+
+    func testSuccessorsMatchReferenceOnRandomBigrams() throws {
+        var rng = LexiconTestRandom(seed: 23)
+        for _ in 0..<6 {
+            let entries = LexiconTestData.randomVocabulary(count: 250, rng: &rng)
+            let bigrams = LexiconTestData.randomBigrams(for: entries, count: 600, rng: &rng)
+            for lexicon in try pair(entries, bigrams: bigrams) {
+                // Reference: both sides map to their key's most frequent casing, the best score per pair wins.
+                func canonical(_ word: String) -> Int? { lexicon.lookup(key: TextUnits.lookupKey(word)).first }
+                var best: [Int: [Int: UInt8]] = [:]
+                for b in bigrams {
+                    guard let score = LexiconFormat.bigramScore(log2Prob: b.log2Prob),
+                          let prev = canonical(b.previous), let next = canonical(b.next) else { continue }
+                    best[prev, default: [:]][next] = max(best[prev]?[next] ?? 0, score)
+                }
+                for id in 0..<lexicon.wordCount {
+                    let main = try XCTUnwrap(canonical(lexicon.word(id)))
+                    let expected = (best[main] ?? [:]).sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+                    let actual = lexicon.successors(of: id, limit: .max)
+                    XCTAssertEqual(actual.map(\.id), expected.map(\.key))
+                    XCTAssertEqual(actual.map(\.log2Prob), expected.map { LexiconFormat.log2Prob(fromScore: $0.value) })
+                    XCTAssertEqual(lexicon.successors(of: id, limit: 2).map(\.id), Array(expected.prefix(2).map(\.key)))
+                }
+            }
         }
     }
 
@@ -420,6 +501,28 @@ final class LexiconTests: XCTestCase {
         }
     }
 
+    func testOverlappingChildRangesStayBounded() throws {
+        // Every node claims all following nodes as children: a naive traversal would take exponential time.
+        var rng = LexiconTestRandom(seed: 31)
+        let entries = LexiconTestData.randomVocabulary(count: 30, maxLength: 4, rng: &rng)
+        var data = LexiconBuilder.build(languageID: "x", entries: entries)
+        let nodeCount = LexiconTestData.u32(data, 12)
+        let nodes = LexiconTestData.u32(data, 40)
+        XCTAssertGreaterThan(nodeCount, 40)
+        for i in 0..<nodeCount {
+            LexiconTestData.setU32(&data, nodes + i * 12, UInt32(i + 1))
+            data[nodes + i * 12 + 6] = UInt8(min(255, nodeCount - i - 1))
+            data[nodes + i * 12 + 7] = 255
+        }
+        XCTAssertThrowsError(try LexiconFormat.validate(data))
+        let lexicon = try BinaryLexicon(data: data)
+        let costs = FuzzyCostModel(substitution: 0, insertion: 0, deletion: 0, transposition: 0, diacritic: 0, apostropheInsertion: 0)
+        // At most `nodeCount` node visits, each offering at most 255 words.
+        XCTAssertLessThanOrEqual(lexicon.fuzzySearch(taps: [.exact("a"), .exact("b")], costs: costs, maxCost: .infinity, limit: .max).count, nodeCount * 255)
+        XCTAssertLessThanOrEqual(lexicon.completions(prefix: "", limit: .max).count, nodeCount * 255)
+        exercise(lexicon)
+    }
+
     func testMemoryMappedFileAndDataSlices() throws {
         let data = LexiconBuilder.build(languageID: "en-US", entries: sample)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("lexicon-\(UUID().uuidString).kbdl")
@@ -464,6 +567,18 @@ final class LexiconTests: XCTestCase {
             XCTAssertEqual(lexicon.word(0), "abcdefghi")
             XCTAssertEqual(lexicon.lookup(key: "zebra"), [255])
         }
+
+        // Both overflows in one build: the root has "a" plus 300 other first letters (the rarest 46 go),
+        // and "abcdefghi" has 300 casings (the rarest 45 go).
+        let combined = Array(casings.dropLast()) + entries.map { (word: $0.word, zipf: $0.zipf - 2) }
+        for lexicon in try pair(combined) {
+            XCTAssertEqual(lexicon.wordCount, 255 + 254)
+            XCTAssertEqual(lexicon.lookup(key: "abcdefghi"), Array(0..<255))
+            XCTAssertEqual(LexiconTestData.words(lexicon, lexicon.lookup(key: letters[253] + "x")), [letters[253] + "x"])
+            XCTAssertEqual(lexicon.lookup(key: letters[254] + "x"), [])
+            XCTAssertEqual(lexicon.completions(prefix: "", limit: .max).count, 509)
+        }
+        XCTAssertNoThrow(try LexiconFormat.validate(LexiconBuilder.build(languageID: "x", entries: combined)))
     }
 
     // MARK: Bundled dictionaries
