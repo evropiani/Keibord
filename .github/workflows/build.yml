@@ -1,0 +1,70 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    container: swift:6.2-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core unit tests
+        run: swift test --package-path Core
+
+  ios:
+    needs: core-tests
+    # Private repos bill macOS minutes at 10x — keep this job lean.
+    runs-on: macos-latest
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project Keibord.xcodeproj -scheme Keibord -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log | grep -E "error:|warning: .*deprecated|BUILD" || true
+          if ! grep -q "BUILD SUCCEEDED" build.log; then
+            echo "::group::Errors"; grep -E "error:|fatal error" build.log | sort -u | head -150; echo "::endgroup::"
+            exit 1
+          fi
+      - name: Package IPA
+        run: |
+          rm -rf Payload && mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Keibord.app Payload/
+          # Ad-hoc sign with entitlements so sideloading tools register the app group.
+          codesign -f -s - --entitlements Keyboard/KeibordKeyboard.entitlements Payload/Keibord.app/PlugIns/KeibordKeyboard.appex
+          codesign -f -s - --entitlements App/Keibord.entitlements Payload/Keibord.app
+          codesign -d --entitlements - Payload/Keibord.app/PlugIns/KeibordKeyboard.appex
+          zip -qry Keibord.ipa Payload
+          ls -lh Keibord.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Keibord-ipa
+          path: Keibord.ipa
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" Keibord.ipa --title "Keibord $GITHUB_REF_NAME" --notes-file docs/RELEASE_NOTES.md
