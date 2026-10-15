@@ -37,7 +37,7 @@ public struct KeyboardMetrics: Hashable, Sendable {
     }
 }
 
-public struct KeyFrame: Hashable, Sendable {
+public struct KeyFrame {
     public var key: KeySpec
     public var rect: CGRect
     public var row: Int

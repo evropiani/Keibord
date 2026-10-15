@@ -10,11 +10,11 @@ struct DictionaryView: View {
     @State private var search = ""
     @State private var newWord = ""
 
-    private var learned: [(String, LearnedWord)] {
+    private var learned: [String] {
         model.userModel.words
             .filter { search.isEmpty || $0.key.localizedCaseInsensitiveContains(search) }
             .sorted { $0.value.count != $1.value.count ? $0.value.count > $1.value.count : $0.key < $1.key }
-            .map { ($0.key, $0.value) }
+            .map { $0.key }
     }
 
     private var blocked: [String] {
@@ -46,12 +46,13 @@ struct DictionaryView: View {
             }
             if tab == 0 {
                 Section {
-                    ForEach(learned, id: \.0) { word, info in
+                    ForEach(learned, id: \.self) { word in
+                        let info = model.userModel.words[word]
                         HStack {
                             Text(word)
-                            if info.addedManually { Image(systemName: "pin.fill").font(.caption).foregroundStyle(.secondary) }
+                            if info?.addedManually == true { Image(systemName: "pin.fill").font(.caption).foregroundStyle(.secondary) }
                             Spacer()
-                            Text("\(info.count)×").foregroundStyle(.secondary).font(.callout)
+                            Text("\(info?.count ?? 0)×").foregroundStyle(.secondary).font(.callout)
                         }
                         .swipeActions {
                             Button("Delete", role: .destructive) { model.editUserModel { $0.removeWord(word) } }
