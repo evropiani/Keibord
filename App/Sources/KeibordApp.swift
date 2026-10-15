@@ -1,0 +1,145 @@
+import SwiftUI
+import KeibordCore
+
+@main
+struct KeibordApp: App {
+    @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .environmentObject(model)
+                .onChange(of: scenePhase) { phase in
+                    if phase == .active { model.refresh() }
+                }
+        }
+    }
+}
+
+/// App-wide state backed by the shared store.
+final class AppModel: ObservableObject {
+    let store = KeibordStore.shared
+
+    @Published var settings: KeibordSettings { didSet { if settings != oldValue { store.saveSettings(settings) } } }
+    @Published var profile: PersonalProfile { didSet { if profile != oldValue { store.saveProfile(profile) } } }
+    @Published private(set) var userModel: UserModel
+    @Published private(set) var state: KeyboardRuntimeState
+    @Published private(set) var cards: [StoredCard]
+
+    init() {
+        settings = store.loadSettings()
+        profile = store.loadProfile()
+        userModel = store.loadUserModel()
+        state = store.loadState()
+        cards = CardVault.shared.cards()
+    }
+
+    func refresh() {
+        let s = store.loadSettings()
+        if s != settings { settings = s }
+        userModel = store.loadUserModel()
+        state = store.loadState()
+        cards = CardVault.shared.cards()
+    }
+
+    func editUserModel(_ transform: @escaping (inout UserModel) -> Void) {
+        store.updateUserModel(transform)
+        userModel = store.loadUserModel()
+    }
+
+    func replaceUserModel(_ model: UserModel) {
+        store.saveUserModel(model)
+        userModel = store.loadUserModel()
+    }
+
+    func reloadCards() { cards = CardVault.shared.cards() }
+}
+
+struct RootView: View {
+    var body: some View {
+        TabView {
+            NavigationStack { HomeView() }
+                .tabItem { Label("Keyboard", systemImage: "keyboard") }
+            NavigationStack { SettingsView() }
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+            NavigationStack { DataView() }
+                .tabItem { Label("Data", systemImage: "externaldrive") }
+        }
+    }
+}
+
+struct HomeView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.openURL) private var openURL
+    @State private var testText = ""
+
+    private var keyboardSeen: Bool { model.state.lastActive != nil }
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 14) {
+                    Image("Logo")
+                        .resizable()
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Keibord").font(.title2.bold())
+                        Text("Private, on-device keyboard").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section("Status") {
+                StatusRow(title: "Keyboard enabled", ok: keyboardSeen,
+                          detail: keyboardSeen ? "Last used \(model.state.lastActive!.formatted(date: .abbreviated, time: .shortened))" : "Not used yet")
+                StatusRow(title: "Full Access", ok: model.state.hasFullAccess,
+                          detail: model.state.hasFullAccess ? "Learning, sync with this app and haptics work" : "Needed for learning, settings sync, cards and haptics")
+                StatusRow(title: "Shared storage", ok: model.store.isShared,
+                          detail: model.store.isShared ? "App and keyboard share data" : "App group unavailable — see Data → Diagnostics")
+            }
+
+            Section("Set up") {
+                Label("Open Settings → General → Keyboard → Keyboards", systemImage: "1.circle")
+                Label("Add New Keyboard… → Keibord", systemImage: "2.circle")
+                Label("Tap Keibord → Allow Full Access", systemImage: "3.circle")
+                Label("In any text field, hold 🌐 and pick Keibord", systemImage: "4.circle")
+                Button("Open Keibord in Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }
+            }
+
+            Section("Try it") {
+                TextField("Type here…", text: $testText, axis: .vertical)
+                    .lineLimit(3...8)
+            }
+
+            Section {
+                Text("Passwords, one-time codes from Messages/Mail and Wallet cards are only available in Apple's keyboard. In code fields Keibord shows a one-tap switch to the iOS keyboard; password fields switch automatically.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Keibord")
+        .refreshable { model.refresh() }
+    }
+}
+
+struct StatusRow: View {
+    let title: String
+    let ok: Bool
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle")
+                .foregroundStyle(ok ? .green : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
