@@ -4,6 +4,11 @@ public struct EmojiCategory: Hashable, Sendable {
     public var id: String
     public var emojis: [String]
 
+    public init(id: String, emojis: [String]) {
+        self.id = id
+        self.emojis = emojis
+    }
+
     /// SF Symbol for the category bar.
     public var symbolName: String {
         switch id {
