@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore: ['**.md', 'docs/**', '.github/workflows/testflight.yml']
   workflow_dispatch:
     inputs:
       release_tag:
@@ -59,8 +60,10 @@ jobs:
           rm -rf Payload && mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/Keibord.app Payload/
           # Ad-hoc sign with entitlements so sideloading tools register the app group.
-          codesign -f -s - --entitlements Keyboard/KeibordKeyboard.entitlements Payload/Keibord.app/PlugIns/KeibordKeyboard.appex
-          codesign -f -s - --entitlements App/Keibord.entitlements Payload/Keibord.app
+          sed 's/$(KEIBORD_BUNDLE_ID)/com.keibord.app/g' Keyboard/KeibordKeyboard.entitlements > keyboard.entitlements
+          sed 's/$(KEIBORD_BUNDLE_ID)/com.keibord.app/g' App/Keibord.entitlements > app.entitlements
+          codesign -f -s - --entitlements keyboard.entitlements Payload/Keibord.app/PlugIns/KeibordKeyboard.appex
+          codesign -f -s - --entitlements app.entitlements Payload/Keibord.app
           codesign -d --entitlements - Payload/Keibord.app/PlugIns/KeibordKeyboard.appex
           zip -qry Keibord.ipa Payload
           ls -lh Keibord.ipa

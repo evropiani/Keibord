@@ -15,6 +15,8 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
+    # Change via the repository variable KEIBORD_BUNDLE_ID (TestFlight builds) if com.keibord.app is taken.
+    KEIBORD_BUNDLE_ID: com.keibord.app
 packages:
   KeibordCore:
     path: Core
@@ -26,6 +28,8 @@ targets:
       - path: App/Sources
       - path: Shared
       - path: App/Assets.xcassets
+      - path: App/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - target: KeibordKeyboard
       - package: KeibordCore
@@ -40,13 +44,14 @@ targets:
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         ITSAppUsesNonExemptEncryption: false
+        KeibordAppGroup: group.$(KEIBORD_BUNDLE_ID)
     entitlements:
       path: App/Keibord.entitlements
       properties:
-        com.apple.security.application-groups: [group.com.keibord.app]
+        com.apple.security.application-groups: [group.$(KEIBORD_BUNDLE_ID)]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.keibord.app
+        PRODUCT_BUNDLE_IDENTIFIER: $(KEIBORD_BUNDLE_ID)
         PRODUCT_NAME: Keibord
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -58,6 +63,8 @@ targets:
     sources:
       - path: Keyboard/Sources
       - path: Shared
+      - path: Keyboard/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - path: Resources/Dictionaries
         type: folder
         buildPhase: resources
@@ -80,12 +87,13 @@ targets:
             PrefersRightToLeft: false
             PrimaryLanguage: de-AT
             RequestsOpenAccess: true
+        KeibordAppGroup: group.$(KEIBORD_BUNDLE_ID)
     entitlements:
       path: Keyboard/KeibordKeyboard.entitlements
       properties:
-        com.apple.security.application-groups: [group.com.keibord.app]
+        com.apple.security.application-groups: [group.$(KEIBORD_BUNDLE_ID)]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.keibord.app.keyboard
+        PRODUCT_BUNDLE_IDENTIFIER: $(KEIBORD_BUNDLE_ID).keyboard
         PRODUCT_NAME: KeibordKeyboard
         APPLICATION_EXTENSION_API_ONLY: YES
