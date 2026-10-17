@@ -52,16 +52,27 @@ public struct AppearanceSettings: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = AppearanceSettings()
         themeMode = c.value(.themeMode, default: d.themeMode)
-        keyCornerRadius = c.value(.keyCornerRadius, default: d.keyCornerRadius)
+        // Out-of-range numbers (hand-edited files, other versions) are clamped to what the app offers.
+        keyCornerRadius = AppearanceSettings.clamp(c.value(.keyCornerRadius, default: d.keyCornerRadius), AppearanceSettings.cornerRadiusRange, default: d.keyCornerRadius)
         keyShadows = c.value(.keyShadows, default: d.keyShadows)
         keyHeight = c.value(.keyHeight, default: d.keyHeight)
-        labelScale = c.value(.labelScale, default: d.labelScale)
+        labelScale = AppearanceSettings.clamp(c.value(.labelScale, default: d.labelScale), AppearanceSettings.labelScaleRange, default: d.labelScale)
         uppercaseLabels = c.value(.uppercaseLabels, default: d.uppercaseLabels)
         showNumberRow = c.value(.showNumberRow, default: d.showNumberRow)
         showSpaceLanguageLabel = c.value(.showSpaceLanguageLabel, default: d.showSpaceLanguageLabel)
         lightColors = c.optionalValue(.lightColors, as: KeyColorScheme.self)
         darkColors = c.optionalValue(.darkColors, as: KeyColorScheme.self)
-        tintedKeys = c.value(.tintedKeys, default: d.tintedKeys)
+        tintedKeys = c.lossyArray(.tintedKeys, default: d.tintedKeys)
+    }
+
+    /// Range of `keyCornerRadius` offered by the app.
+    public static let cornerRadiusRange: ClosedRange<Double> = 0...16
+    /// Range of `labelScale` offered by the app.
+    public static let labelScaleRange: ClosedRange<Double> = 0.8...1.3
+
+    static func clamp(_ value: Double, _ range: ClosedRange<Double>, default defaultValue: Double) -> Double {
+        guard value.isFinite else { return defaultValue }
+        return min(range.upperBound, max(range.lowerBound, value))
     }
 }
 
@@ -145,13 +156,17 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
         let d = KeibordSettings()
         version = c.value(.version, default: d.version)
         // Unknown language codes (from a newer version) are dropped instead of failing.
-        let rawLanguages = c.value(.enabledLanguages, default: [String]())
-        let parsed = rawLanguages.compactMap(KeyboardLanguage.init(rawValue:))
-        enabledLanguages = c.contains(.enabledLanguages) ? parsed : d.enabledLanguages
-        if enabledLanguages.isEmpty { enabledLanguages = d.enabledLanguages }
-        layoutOverrides = c.value(.layoutOverrides, default: d.layoutOverrides)
+        // Duplicates are removed (the language key would otherwise cycle through a language twice).
+        let rawLanguages = c.lossyArray(.enabledLanguages, default: [String]())
+        var parsed: [KeyboardLanguage] = []
+        for language in rawLanguages.compactMap(KeyboardLanguage.init(rawValue:)) where !parsed.contains(language) {
+            parsed.append(language)
+        }
+        enabledLanguages = parsed.isEmpty ? d.enabledLanguages : parsed
+        // Entries for unknown languages or layouts/quote styles from a newer version are skipped one by one.
+        layoutOverrides = c.lossyDictionary(.layoutOverrides, default: d.layoutOverrides)
         multilingualTyping = c.value(.multilingualTyping, default: d.multilingualTyping)
-        quoteStyleOverrides = c.value(.quoteStyleOverrides, default: d.quoteStyleOverrides)
+        quoteStyleOverrides = c.lossyDictionary(.quoteStyleOverrides, default: d.quoteStyleOverrides)
         autocorrect = c.value(.autocorrect, default: d.autocorrect)
         autoCapitalization = c.value(.autoCapitalization, default: d.autoCapitalization)
         predictiveText = c.value(.predictiveText, default: d.predictiveText)
@@ -214,4 +229,56 @@ public extension KeyedDecodingContainer {
     func optionalValue<T: Decodable>(_ key: Key, as type: T.Type) -> T? {
         (try? decodeIfPresent(T.self, forKey: key)) ?? nil
     }
+
+    /// Decodes an array element by element: invalid elements (an unknown enum case written by a newer
+    /// version, a damaged entry) are skipped instead of discarding the whole array. Returns
+    /// `defaultValue` when the key is missing or not an array.
+    func lossyArray<T: Decodable>(_ key: Key, default defaultValue: [T]) -> [T] {
+        guard var items = try? nestedUnkeyedContainer(forKey: key) else { return defaultValue }
+        var result: [T] = []
+        if let count = items.count { result.reserveCapacity(count) }
+        while !items.isAtEnd {
+            if let item = try? items.decode(T.self) {
+                result.append(item)
+            } else if (try? items.decode(SkippedValue.self)) == nil {
+                break
+            }
+        }
+        return result
+    }
+
+    /// Decodes a string-keyed dictionary entry by entry: invalid values are skipped instead of
+    /// discarding the whole dictionary (a single damaged learned word must not wipe all others).
+    /// Returns `defaultValue` when the key is missing or not an object.
+    func lossyDictionary<T: Decodable>(_ key: Key, default defaultValue: [String: T]) -> [String: T] {
+        guard let entries = try? nestedContainer(keyedBy: AnyCodingKey.self, forKey: key) else { return defaultValue }
+        let keys = entries.allKeys
+        var result: [String: T] = [:]
+        result.reserveCapacity(keys.count)
+        for k in keys {
+            if let value = try? entries.decode(T.self, forKey: k) { result[k.stringValue] = value }
+        }
+        return result
+    }
+}
+
+/// Any JSON object key (used to decode dictionaries entry by entry).
+public struct AnyCodingKey: CodingKey, Hashable, Sendable {
+    public var stringValue: String
+    public var intValue: Int?
+
+    public init(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    public init(intValue: Int) {
+        stringValue = String(intValue)
+        self.intValue = intValue
+    }
+}
+
+/// Consumes one value of any type (moves an unkeyed container past an element that failed to decode).
+private struct SkippedValue: Decodable {
+    init(from decoder: Decoder) throws {}
 }

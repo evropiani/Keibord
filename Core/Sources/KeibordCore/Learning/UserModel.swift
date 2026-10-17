@@ -17,6 +17,16 @@ public struct LearnedWord: Codable, Equatable, Sendable {
         self.language = language
         self.addedManually = addedManually
     }
+
+    private enum CodingKeys: String, CodingKey { case count, lastUsedDay, language, addedManually }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = max(0, c.value(.count, default: 1))
+        lastUsedDay = c.value(.lastUsedDay, default: 0)
+        language = c.optionalValue(.language, as: String.self)
+        addedManually = c.value(.addedManually, default: false)
+    }
 }
 
 /// Accumulated touch offsets for one key in one layout geometry (normalised by key size).
@@ -33,6 +43,15 @@ public struct TouchStat: Codable, Equatable, Sendable {
 
     public var meanDX: Double { count > 0 ? sumDX / Double(count) : 0 }
     public var meanDY: Double { count > 0 ? sumDY / Double(count) : 0 }
+
+    private enum CodingKeys: String, CodingKey { case sumDX, sumDY, count }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sumDX = c.value(.sumDX, default: 0)
+        sumDY = c.value(.sumDY, default: 0)
+        count = max(0, c.value(.count, default: 0))
+    }
 }
 
 public struct EmojiStat: Codable, Equatable, Sendable {
@@ -43,6 +62,14 @@ public struct EmojiStat: Codable, Equatable, Sendable {
     public init(count: Int, lastUsed: Double) {
         self.count = count
         self.lastUsed = lastUsed
+    }
+
+    private enum CodingKeys: String, CodingKey { case count, lastUsed }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = max(0, c.value(.count, default: 1))
+        lastUsed = c.value(.lastUsed, default: 0)
     }
 }
 
@@ -82,11 +109,13 @@ public struct UserModel: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = c.value(.version, default: 1)
-        words = c.value(.words, default: [:])
-        bigrams = c.value(.bigrams, default: [:])
-        blocked = c.value(.blocked, default: [])
-        touch = c.value(.touch, default: [:])
-        emoji = c.value(.emoji, default: [:])
-        languageUsage = c.value(.languageUsage, default: [:])
+        // Entry by entry: one damaged entry must not wipe everything learned (the next save would
+        // make the loss permanent).
+        words = c.lossyDictionary(.words, default: [:])
+        bigrams = c.lossyDictionary(.bigrams, default: [:])
+        blocked = Set(c.lossyArray(.blocked, default: [String]()))
+        touch = c.lossyDictionary(.touch, default: [:])
+        emoji = c.lossyDictionary(.emoji, default: [:])
+        languageUsage = c.lossyDictionary(.languageUsage, default: [:])
     }
 }

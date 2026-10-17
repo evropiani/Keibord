@@ -128,4 +128,14 @@ public struct TintedKey: Codable, Hashable, Identifiable, Sendable {
     }
 
     public var effectiveLabelColor: RGBAColor { labelColor ?? color.contrastingLabel }
+
+    private enum CodingKeys: String, CodingKey { case keyID, color, labelColor }
+
+    /// `keyID` and `color` are required; an invalid label colour falls back to automatic contrast.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        keyID = try c.decode(String.self, forKey: .keyID)
+        color = try c.decode(RGBAColor.self, forKey: .color)
+        labelColor = c.optionalValue(.labelColor, as: RGBAColor.self)
+    }
 }
