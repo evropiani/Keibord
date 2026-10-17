@@ -12,13 +12,34 @@ import CoreGraphics
 /// `EngineQualityDataTests.swift`. Set `KEIBORD_EVAL_VERBOSE=1` to print every miss.
 final class EngineQualityTests: XCTestCase {
     // MARK: Thresholds (current measured values are printed by every test run)
+    //
+    // Measured on the bundled dictionaries (Oct 2026, before → after the engine-quality pass):
+    //   mono accuracy        de 95.5 → 98.9 %, en 91.0 → 98.7 %, sq 100 → 98.2 %, it 98.4 → 98.4 %; top-3 ≥ 98.7 → 100 %
+    //   4 languages (cold)   de 83.1 → 94.4 %, en 75.6 → 88.5 %, sq 91.1 → 96.4 %, it 92.2 → 98.4 %
+    //   4 languages (context) de 83.1 → 98.9 %, en 82.1 → 93.6 %, sq 91.1 → 98.2 %, it 93.8 → 98.4 %
+    //   German layout        en 70.5 → 80.8 %, sq 89.3 → 94.6 %
+    //   curated valid words  false positives mono 24 → 0, multilingual 17 → 0; shared names/slang 29 → 0;
+    //                        held-out valid words 22/31/27/23 → 4/1/3/0 (de/en/sq/it), four languages 18 → 1
+    // The floors sit a few cases below the measured values so dictionary updates do not break the build,
+    // while a real regression in a category still does.
 
     /// Minimum share of typo cases whose autocorrection is exactly the intended word.
-    static let minAccuracy: [KeyboardLanguage: Double] = [.deAT: 0.85, .enGB: 0.85, .sqXK: 0.85, .itIT: 0.85]
+    static let minAccuracy: [KeyboardLanguage: Double] = [.deAT: 0.93, .enGB: 0.93, .sqXK: 0.93, .itIT: 0.93]
     /// Minimum share of typo cases with the intended word in the bar (or as autocorrection).
-    static let minTop3: [KeyboardLanguage: Double] = [.deAT: 0.92, .enGB: 0.92, .sqXK: 0.92, .itIT: 0.92]
-    /// Accuracy floor with all four of the owner's languages enabled (layout language first).
-    static let minMultilingualAccuracy = 0.80
+    static let minTop3: [KeyboardLanguage: Double] = [.deAT: 0.97, .enGB: 0.97, .sqXK: 0.97, .itIT: 0.97]
+    /// Most typo cases one language alone may autocorrect into a different word (measured: 0).
+    static let maxWrongAutocorrections = 1
+    /// Accuracy floor with all four of the owner's languages enabled (layout language first), first word.
+    static let minMultilingualAccuracy = 0.85
+    /// Same, a few words into the message (the language detector knows the language).
+    static let minMultilingualAccuracyAfterContext = 0.90
+    /// English and Albanian typed on the German layout.
+    static let minAccuracyOnGermanLayout: [KeyboardLanguage: Double] = [.enGB: 0.75, .sqXK: 0.88]
+    /// Held-out valid words (names, slang, brands) never tuned on: most false positives per configuration.
+    /// The remaining ones are mostly legitimate in the active language (German "safe" → "Safe").
+    static let maxValidationFalsePositives = 6
+    /// Same with all four of the owner's languages enabled (measured: "gspritzter" → "Gspritzter").
+    static let maxValidationFalsePositivesMultilingual = 2
     /// Categories whose typed form may be a dictionary key.
     static let knownTypoCategories: Set<String> = ["case", "variety"]
 
@@ -59,6 +80,7 @@ final class EngineQualityTests: XCTestCase {
             let m = h.evaluate(EngineQualityData.typoCases(for: language), label: "mono \(language.rawValue)") { _ in [language] }
             XCTAssertGreaterThanOrEqual(m.accuracy, Self.minAccuracy[language] ?? 0.8, "\(language) accuracy\n\(m.failureList)")
             XCTAssertGreaterThanOrEqual(m.top3Recall, Self.minTop3[language] ?? 0.9, "\(language) top-3 recall\n\(m.failureList)")
+            XCTAssertLessThanOrEqual(m.wrongAutocorrections, Self.maxWrongAutocorrections, "\(language) wrong autocorrections\n\(m.failureList)")
         }
     }
 
@@ -81,7 +103,8 @@ final class EngineQualityTests: XCTestCase {
             let m = h.evaluate(EngineQualityData.typoCases(for: language), label: "multi+context \(language.rawValue)", primeDetector: true) {
                 EngineQualityData.ownerLanguages(first: $0)
             }
-            XCTAssertGreaterThanOrEqual(m.accuracy, Self.minMultilingualAccuracy, "\(language) multilingual accuracy after context\n\(m.failureList)")
+            XCTAssertGreaterThanOrEqual(m.accuracy, Self.minMultilingualAccuracyAfterContext,
+                                        "\(language) multilingual accuracy after context\n\(m.failureList)")
         }
     }
 
@@ -93,7 +116,7 @@ final class EngineQualityTests: XCTestCase {
             let m = h.evaluate(EngineQualityData.typoCases(for: language), label: "de-layout \(language.rawValue)") { _ in
                 [.deAT, .enGB, .sqXK]
             }
-            XCTAssertGreaterThanOrEqual(m.accuracy, 0.7, "\(language) on the German layout\n\(m.failureList)")
+            XCTAssertGreaterThanOrEqual(m.accuracy, Self.minAccuracyOnGermanLayout[language] ?? 0.7, "\(language) on the German layout\n\(m.failureList)")
         }
     }
 
@@ -110,7 +133,9 @@ final class EngineQualityTests: XCTestCase {
             XCTAssertTrue(multi.isEmpty, "\(language) multilingual: \(multi.joined(separator: ", "))")
         }
         for languages in [[KeyboardLanguage.deAT], [.enGB], [.sqXK], [.itIT], [.deAT, .enGB, .sqXK, .itIT]] {
-            _ = h.falsePositives(EngineQualityData.validationValidWords, label: "validation \(languages.map(\.rawValue))") { _ in languages }
+            let fp = h.falsePositives(EngineQualityData.validationValidWords, label: "validation \(languages.map(\.rawValue))") { _ in languages }
+            let limit = languages.count > 1 ? Self.maxValidationFalsePositivesMultilingual : Self.maxValidationFalsePositives
+            XCTAssertLessThanOrEqual(fp.count, limit, "held-out valid words \(languages): \(fp.joined(separator: ", "))")
         }
         let shared = EngineQualityData.sharedValidWords
         for languages in [[KeyboardLanguage.deAT, .enGB, .sqXK], [.deAT], [.enGB], [.sqXK], [.itIT]] {
@@ -144,11 +169,11 @@ final class EngineQualityTests: XCTestCase {
         for language in EngineQualityData.evaluatedLanguages {
             let cases = EngineQualityData.completionCases(for: language)
             let mono = h.evaluate(cases, label: "completion mono \(language.rawValue)") { _ in [language] }
-            XCTAssertGreaterThanOrEqual(mono.top3Recall, 0.9, "\(language) completions\n\(mono.failureList)")
+            XCTAssertGreaterThanOrEqual(mono.top3Recall, 0.93, "\(language) completions\n\(mono.failureList)")
             // "nesë" → "nëse" is a fair guess on space; a prefix becoming an unrelated word ("Nachri" → "Nach") is not.
             XCTAssertLessThanOrEqual(mono.wrongAutocorrections, cases.count / 10, "prefixes autocorrected into other words\n\(mono.failureList)")
             let multi = h.evaluate(cases, label: "completion multi \(language.rawValue)") { EngineQualityData.ownerLanguages(first: $0) }
-            XCTAssertGreaterThanOrEqual(multi.top3Recall, 0.8, "\(language) multilingual completions\n\(multi.failureList)")
+            XCTAssertGreaterThanOrEqual(multi.top3Recall, 0.9, "\(language) multilingual completions\n\(multi.failureList)")
         }
     }
 

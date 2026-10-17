@@ -13,12 +13,19 @@ import CoreGraphics
 /// misspelt word must come out as intended. `{a>s}` in the typed text means "meant a, but the finger
 /// landed 65 % of the way towards s". Set `KEIBORD_EVAL_VERBOSE=1` to print every wrong word.
 final class EngineQualitySentenceTests: XCTestCase {
+    // Measured before → after the engine-quality pass (Oct 2026): fixed words mono de 70 → 100 %, en 85 → 100 %,
+    // sq 90 → 90 %, it 69 → 100 %; four languages de 41 → 100 %, en 69 → 92 %, sq 67 → 90 %, it 54 → 100 %;
+    // German layout 57 → 94 %; held-out validation 69 → 89 %. Damaged correct words: monolingual 5/270 → 0,
+    // four languages 4/270 → 0, held-out 7/369 → 0.
+
     /// Minimum share of misspelt words that come out as intended.
-    static let minFixRate = 0.80
+    static let minFixRate = 0.85
     /// Owner's four languages, layout language = the sentence's language.
-    static let minFixRateMultilingual = 0.75
+    static let minFixRateMultilingual = 0.85
     /// Albanian / English / Italian typed on the German layout with all four languages enabled.
-    static let minFixRateOnGermanLayout = 0.70
+    static let minFixRateOnGermanLayout = 0.85
+    /// Held-out sentences (written after tuning).
+    static let minFixRateValidation = 0.80
 
     private func requireDictionaries() throws {
         guard EngineQualityHarness.available else { throw XCTSkip("dictionaries not built") }
@@ -82,7 +89,7 @@ extension EngineQualitySentenceTests {
         total.add(mixed)
         print(String(format: "[quality] validation all: fixed %.1f%% (%d/%d), damaged %d/%d", total.fixRate * 100, total.fixed, total.toFix,
                      total.damaged, total.toKeep))
-        XCTAssertGreaterThanOrEqual(total.fixRate, 0.7, total.failureList)
+        XCTAssertGreaterThanOrEqual(total.fixRate, Self.minFixRateValidation, total.failureList)
     }
 }
 
