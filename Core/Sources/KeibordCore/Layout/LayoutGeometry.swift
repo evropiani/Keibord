@@ -52,11 +52,19 @@ public struct KeyFrame {
 }
 
 public enum LayoutGeometry {
+    /// Frames of all keys (spacers included) in reading order; `KeyFrame.index` is the array index.
+    ///
+    /// Every frame lies within `[0, width]`. A row whose fixed keys do not fit (only possible for
+    /// hand-built layouts or tiny widths) is shrunk proportionally instead of overflowing, and
+    /// when even the gaps do not fit they shrink too, so frames never get negative widths.
     public static func frames(for layout: KeyboardLayout, width: CGFloat, metrics m: KeyboardMetrics) -> [KeyFrame] {
         var frames: [KeyFrame] = []
+        let width = width.isFinite ? max(0, width) : 0
+        let side = min(max(0, m.sideInset), width / 2)
+        let available = width - 2 * side
+        let gap = max(0, m.horizontalGap)
         let units = CGFloat(max(layout.unitCount, 1))
-        let available = width - 2 * m.sideInset
-        let unit = max(1, (available - (units - 1) * m.horizontalGap) / units)
+        let unit = max(0, (available - (units - 1) * gap) / units)
         for (rowIndex, row) in layout.rows.enumerated() {
             let y = m.topInset + CGFloat(rowIndex) * m.rowPitch + (m.rowPitch - m.keyHeight) / 2
             var widths: [CGFloat] = []
@@ -64,26 +72,35 @@ public enum LayoutGeometry {
             for key in row.keys {
                 switch key.width {
                 case .units(let u):
-                    let w = CGFloat(u) * unit + max(0, CGFloat(u) - 1) * m.horizontalGap
-                    widths.append(w)
+                    let u = CGFloat(u.isFinite ? max(0, u) : 0)
+                    widths.append(u * unit + max(0, u - 1) * gap)
                 case .fill:
                     widths.append(0)
                     fills += 1
                 }
             }
-            let gaps = CGFloat(max(0, row.keys.count - 1)) * m.horizontalGap
-            let remaining = available - widths.reduce(0, +) - gaps
-            var x = m.sideInset
-            if fills > 0 {
-                let each = max(0, remaining / CGFloat(fills))
+            var rowGap = gap
+            var gaps = CGFloat(max(0, row.keys.count - 1)) * rowGap
+            let fixed = widths.reduce(0, +)
+            var x = side
+            if fixed + gaps > available {
+                // Overfull: shrink the fixed keys (keeping their proportions); fill keys get nothing.
+                if gaps >= available {
+                    rowGap = row.keys.count > 1 ? available / CGFloat(row.keys.count - 1) : 0
+                    gaps = available
+                }
+                let scale = fixed > 0 ? max(0, available - gaps) / fixed : 0
+                widths = widths.map { $0 * scale }
+            } else if fills > 0 {
+                let each = (available - fixed - gaps) / CGFloat(fills)
                 for (i, key) in row.keys.enumerated() where key.width == .fill { widths[i] = each }
             } else {
-                x += max(0, remaining / 2)
+                x += (available - fixed - gaps) / 2
             }
             for (i, key) in row.keys.enumerated() {
                 let rect = CGRect(x: x, y: y, width: widths[i], height: m.keyHeight)
                 frames.append(KeyFrame(key: key, rect: rect, row: rowIndex, index: frames.count))
-                x += widths[i] + m.horizontalGap
+                x += widths[i] + rowGap
             }
         }
         return frames
@@ -103,7 +120,7 @@ public struct TouchResolver {
 
     public init(frames: [KeyFrame], offsets: [String: (dx: Double, dy: Double)] = [:], touchModelKey: String = "") {
         self.frames = frames
-        self.offsets = offsets.mapValues { (dx: min(0.25, max(-0.25, $0.dx)), dy: min(0.25, max(-0.25, $0.dy))) }
+        self.offsets = offsets.mapValues { (dx: Self.clampOffset($0.dx), dy: Self.clampOffset($0.dy)) }
         self.touchModelKey = touchModelKey
         var bands: [Int: (CGFloat, CGFloat)] = [:]
         for f in frames {
@@ -111,6 +128,11 @@ public struct TouchResolver {
             bands[f.row] = (min(b.0, f.rect.minY), max(b.1, f.rect.maxY))
         }
         rowBands = bands.keys.sorted().map { (row: $0, minY: bands[$0]!.0, maxY: bands[$0]!.1) }
+    }
+
+    /// Learned offsets are clamped to ±0.25 key sizes; NaN (corrupt statistics) counts as no offset.
+    static func clampOffset(_ value: Double) -> Double {
+        value.isNaN ? 0 : min(0.25, max(-0.25, value))
     }
 
     private func isLetter(_ f: KeyFrame) -> Bool { f.key.style == .character && f.key.isLetter }
@@ -161,21 +183,24 @@ public struct TouchResolver {
     private func tap(at point: CGPoint, hit: KeyFrame) -> TapInput {
         guard isLetter(hit) else {
             if hit.key.style == .character, case .insert(let text) = hit.key.action {
-                return TapInput(candidates: [TapCandidate(character: text.lowercased(), cost: 0)], touchModelKey: touchModelKey)
+                let d = normalizedDistance(point, hit, adjusted: false)
+                return TapInput(candidates: [TapCandidate(character: text.lowercased(), cost: 0, dx: d.dx, dy: d.dy)], touchModelKey: touchModelKey)
             }
             return TapInput(candidates: [], touchModelKey: touchModelKey)
         }
         let hitD = normalizedDistance(point, hit, adjusted: true)
-        var candidates: [TapCandidate] = [TapCandidate(character: hit.key.id, cost: 0, dx: hitD.dx, dy: hitD.dy)]
+        var others: [TapCandidate] = []
         let log2e = 1.4426950408889634
-        for f in frames where isLetter(f) && f.index != hit.index {
+        for f in frames where isLetter(f) && f.index != hit.index && f.key.id != hit.key.id {
             let d = normalizedDistance(point, f, adjusted: true)
             guard d.d <= 1.6 else { continue }
             let cost = max(0, 2.5 * (d.d * d.d - hitD.d * hitD.d) * log2e)
-            candidates.append(TapCandidate(character: f.key.id, cost: cost, dx: d.dx, dy: d.dy))
+            others.append(TapCandidate(character: f.key.id, cost: cost, dx: d.dx, dy: d.dy))
         }
-        candidates.sort { $0.cost < $1.cost }
-        return TapInput(candidates: candidates, touchModelKey: touchModelKey)
+        // The hit key always comes first (cost 0), even when a neighbour ties with it.
+        others.sort { $0.cost < $1.cost }
+        return TapInput(candidates: [TapCandidate(character: hit.key.id, cost: 0, dx: hitD.dx, dy: hitD.dy)] + others,
+                        touchModelKey: touchModelKey)
     }
 
     /// A tap at the centre of the key for `character` (used when no real touch is available).

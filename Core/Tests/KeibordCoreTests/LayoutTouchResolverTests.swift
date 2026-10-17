@@ -126,12 +126,19 @@ final class LayoutTouchResolverTests: XCTestCase {
         let r = LayoutRequest(language: .enUS, base: .qwerty)
         let (_, frames, plain) = make(r)
         let e = frame(frames, "e"), w = frame(frames, "w")
-        // Just inside "e", 2 pt from the "w" boundary.
-        let p = CGPoint(x: e.rect.minX + 2, y: e.rect.midY)
+        // Just inside "e", half a point from its left edge.
+        let p = CGPoint(x: e.rect.minX + 0.5, y: e.rect.midY)
         XCTAssertEqual(plain.resolve(p)?.frameIndex, e.index)
-        // The user habitually hits "w" right of its centre → the touch now belongs to "w".
+        // The user habitually hits "w" right of its centre (+0.25 key widths): the boundary moves
+        // to halfway between the shifted "w" centre and the "e" centre, ≈ 1.2 pt inside "e".
         let (_, _, adapted) = make(r, offsets: ["w": (dx: 0.25, dy: 0)])
         XCTAssertEqual(adapted.resolve(p)?.frameIndex, w.index)
+        XCTAssertEqual(adapted.resolve(CGPoint(x: e.rect.minX + 2, y: e.rect.midY))?.frameIndex, e.index)
+        XCTAssertEqual(adapted.resolve(CGPoint(x: (w.rect.maxX + e.rect.minX) / 2 + 0.5, y: e.rect.midY))?.frameIndex, w.index,
+                       "the gap now belongs to w")
+        // The same habit on "e" (hitting it left of centre) cancels the shift.
+        let (_, _, both) = make(r, offsets: ["w": (dx: 0.25, dy: 0), "e": (dx: -0.25, dy: 0)])
+        XCTAssertEqual(both.resolve(p)?.frameIndex, e.index)
         // The key centre itself is never taken over by a neighbour.
         XCTAssertEqual(adapted.resolve(centre(e))?.frameIndex, e.index)
         // Vertical: hitting "s" high pulls the boundary to the row above.
@@ -154,7 +161,7 @@ final class LayoutTouchResolverTests: XCTestCase {
         for id in ["s", "e", "r", "f", "x", "c"] {
             XCTAssertEqual(huge.resolve(centre(frame(frames, id)))?.frameIndex, frame(frames, id).index, id)
         }
-        let (_, _, quarter) = make(r, offsets: ["d": (dx: 0.25, dy: -0.25)])
+        let (_, _, quarter) = make(r, offsets: ["d": (dx: 0.25, dy: -0.25), "f": (dx: 0.25, dy: 0), "g": (dx: 0, dy: 0)])
         let f = frame(frames, "f")
         for dx in stride(from: -0.5, through: 0.5, by: 0.1) {
             let p = CGPoint(x: f.rect.midX + CGFloat(dx) * f.rect.width, y: f.rect.minY + 1)
@@ -189,19 +196,28 @@ final class LayoutTouchResolverTests: XCTestCase {
         // Sorted by cost; every candidate is a distinct letter.
         XCTAssertEqual(tap.candidates.map { $0.cost }, tap.candidates.map { $0.cost }.sorted())
         XCTAssertEqual(Set(tap.candidates.map { $0.character }).count, tap.candidates.count)
-        // Plausible neighbours of "g" on QWERTZ.
+        // Plausible neighbours of "g" on the German 11-unit QWERTZ layout: the top and home rows are
+        // not staggered (t sits above g, c below it), so v/b are diagonal and out of range.
         let chars = Set(tap.candidates.map { $0.character })
-        for n in ["f", "h", "t", "z", "v", "b"] { XCTAssertTrue(chars.contains(n), n) }
-        for far in ["q", "p", "a", "ä", "y", "m"] { XCTAssertFalse(chars.contains(far), far) }
+        XCTAssertEqual(chars, ["g", "f", "h", "t", "z", "c"])
+        XCTAssertEqual(tap.candidates[1].character, "h", "touch right of centre → h is the cheapest alternative")
+        // On staggered QWERTY the same touch also reaches y (above-right) and v (below).
+        let (_, enFrames, en) = make(LayoutRequest(language: .enUS, base: .qwerty), offsets: offsets)
+        let enG = frame(enFrames, "g")
+        let enTap = en.resolve(CGPoint(x: enG.rect.midX + 4, y: enG.rect.midY - 6))!.tap
+        XCTAssertEqual(enTap.primary, "g")
+        XCTAssertEqual(enTap.touchModelKey, "qwerty10.letters.standard")
+        XCTAssertEqual(Set(enTap.candidates.map { $0.character }), ["g", "f", "h", "t", "y", "v"])
     }
 
     func testCandidateCostsGrowWithDistance() {
         let (_, frames, resolver) = make(LayoutRequest(language: .enUS, base: .qwerty))
         let f = frame(frames, "f"), g = frame(frames, "g"), d = frame(frames, "d")
-        var lastG = -1.0, lastD = Double.infinity
-        // Walk from the left edge of "f" to its right edge: "g" gets cheaper, "d" more expensive.
+        var lastG = Double.infinity, lastD = -1.0
+        // Walk across "f" from left to right (staying where both neighbours are within the
+        // 1.6-key candidate radius): "g" gets cheaper, "d" more expensive.
         for step in 0...10 {
-            let x = f.rect.minX + 1 + CGFloat(step) / 10 * (f.rect.width - 2)
+            let x = f.rect.midX + CGFloat(-0.4 + 0.08 * Double(step)) * f.rect.width
             let tap = resolver.resolve(CGPoint(x: x, y: f.rect.midY))!.tap
             XCTAssertEqual(tap.primary, "f")
             let gCost = tap.candidates.first { $0.character == "g" }!.cost
@@ -256,8 +272,11 @@ final class LayoutTouchResolverTests: XCTestCase {
             }
         }
         let (_, _, resolver) = make(LayoutRequest(language: .deAT, base: .qwertz))
-        let s = Set(resolver.syntheticTap(for: "s").candidates.map { $0.character })
-        XCTAssertEqual(s, ["s", "a", "d", "w", "e", "y", "x"])
+        // German: w directly above s; e and y (under d) are diagonal, 1.74 key sizes away.
+        XCTAssertEqual(Set(resolver.syntheticTap(for: "s").candidates.map { $0.character }), ["s", "a", "d", "w"])
+        // QWERTY: the home row is staggered by half a key, z sits directly under s.
+        let (_, _, en) = make(LayoutRequest(language: .enUS, base: .qwerty))
+        XCTAssertEqual(Set(en.syntheticTap(for: "s").candidates.map { $0.character }), ["s", "a", "d", "w", "e", "z"])
         XCTAssertEqual(resolver.syntheticTap(for: "ß"), .exact("ß"))
         XCTAssertEqual(resolver.syntheticTap(for: "1"), .exact("1"))
         XCTAssertEqual(resolver.syntheticTap(for: "Ä").primary, "ä")

@@ -407,9 +407,15 @@ final class LayoutFactoryTests: XCTestCase {
             } else {
                 XCTAssertGreaterThanOrEqual(free, 3.5 - 1e-9, what)
             }
+            // Function keys never shrink below a letter key, the return key never below 1.5 letters.
             for key in row.keys where key.isInteractive && key.width != .fill {
-                let minimum = key.id == "return" ? 1.6 : 0.9
+                let minimum = key.id == "return" ? 1.5 : 1.0
                 XCTAssertGreaterThanOrEqual(S.units(key)! / (layout.unitCount / 10), minimum - 1e-9, "\(what) \(key.id)")
+            }
+            // Uncrowded rows keep the preferred iOS widths.
+            if !r.showLanguageKey && !r.showGlobeKey {
+                XCTAssertEqual(S.units(row.keys[0])! / (layout.unitCount / 10), 1.25, accuracy: 1e-9, what)
+                XCTAssertEqual(S.units(row.keys[1])! / (layout.unitCount / 10), 1.25, accuracy: 1e-9, what)
             }
         }
     }
