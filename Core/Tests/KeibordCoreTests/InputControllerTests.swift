@@ -313,10 +313,17 @@ final class InputControllerTests: XCTestCase {
         for (text, expected) in [("Hallo. ", true), ("Wirklich! ", true), ("Wie? ", true), ("Naja… ", true), ("Zeile\n", true),
                                  ("Hallo, ", false), ("Hallo.", false), ("z.B", false), ("Hallo ", false),
                                  ("Er sagte „Ja.“ ", true), ("Ja. „", true), ("„", true), ("(", true), ("Ja. (", true),
-                                 ("Er sagt „", false), ("   ", true), ("Ja.\n\n", true)] {
+                                 ("Er sagt „", false), ("   ", true), ("Ja.\n\n", true),
+                                 ("Das ist z.B. ", false), ("Siehe z. B. ", false), ("Grüße an Dr. ", false), ("Er heißt A. ", false),
+                                 ("Wir kommen um 5. ", true), ("Naja... ", true), ("Gut. ", true), ("i.e. ", false), ("(Hallo.) ", true)] {
             setDocument(text)
             XCTAssertEqual(c.shiftState == .on, expected, "after \(text.debugDescription)")
         }
+    }
+
+    func testAbbreviationDoesNotStartASentence() {
+        type("das ist z.b. gut. ja")
+        XCTAssertEqual(doc.text, "Das ist z.b. gut. Ja")
     }
 
     func testSentenceStartAfterOpeningQuoteCapitalisesTheWord() {
@@ -980,6 +987,28 @@ final class InputControllerTests: XCTestCase {
         XCTAssertEqual(doc.text, "teh😀")
         XCTAssertEqual(sink.commits.last?.final, "teh")
         XCTAssertEqual(sink.commits.last?.corrected, false)
+    }
+
+    func testTrailingWordAndWords() {
+        let cases: [(String, String)] = [
+            ("", ""), ("hallo", "hallo"), ("hallo ", ""), ("ein Haus", "Haus"), ("don'", "don'"), ("don't", "don't"),
+            ("geht’s", "geht’s"), ("'hallo", "hallo"), ("x ''", ""), ("e-mail", "mail"), ("mp3", "mp3"), ("👍ok", "ok"),
+            ("scho\u{308}n", "scho\u{308}n"), ("a.b", "b"), ("Ünd", "Ünd"), ("1️⃣", ""),
+        ]
+        for (context, expected) in cases {
+            XCTAssertEqual(TextUnits.trailingWord(in: context), expected, context.debugDescription)
+        }
+        XCTAssertEqual(TextUnits.words(in: "Er geht’s an, l'amico 'x' don't."), ["Er", "geht’s", "an", "l'amico", "x", "don't"])
+        XCTAssertEqual(TextUnits.lookupKey("Geht’s"), "geht's")
+        XCTAssertEqual(TextUnits.lookupKey("SCHO\u{308}N"), "schön")
+    }
+
+    func testTypingInALongDocumentStaysFast() {
+        setDocument(String(repeating: "Ein ziemlich langer Absatz mit vielen Wörtern. ", count: 200))
+        let start = Date()
+        type(String(repeating: "noch ein satz mit worten. ", count: 8))
+        let perKey = Date().timeIntervalSince(start) / Double(26 * 8)
+        XCTAssertLessThan(perKey, 0.01, "controller overhead per key press")
     }
 
     // MARK: - Cursor movement and external changes

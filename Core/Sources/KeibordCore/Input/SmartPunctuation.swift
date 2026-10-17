@@ -112,7 +112,28 @@ enum SmartPunctuation {
         guard sawSpace else { return false }
         while let last = rest.last, sentenceClosers.contains(last) { rest = rest.dropLast() }
         guard let terminator = rest.last else { return true }
-        return TextUnits.sentenceTerminators.contains(terminator)
+        guard TextUnits.sentenceTerminators.contains(terminator) else { return false }
+        return terminator != "." || !endsWithAbbreviation(rest.dropLast())
+    }
+
+    /// Abbreviations after which a period does not end the sentence (titles and the like).
+    private static let abbreviations: Set<String> = ["dr", "prof", "nr", "hr", "fr", "mr", "mrs", "ms", "st", "jr", "sr", "bzw", "vgl", "ca", "sig", "dott"]
+
+    /// Whether the text before a period is an abbreviation: initials and dotted abbreviations
+    /// ("A.", "z.B.", "d.h.", "e.g.") or a title ("Dr.", "Nr.").
+    static func endsWithAbbreviation(_ text: Substring) -> Bool {
+        var start = text.endIndex
+        while start > text.startIndex {
+            let previous = text.index(before: start)
+            let c = text[previous]
+            if c.isWhitespace || sentenceOpeners.contains(c) { break }
+            start = previous
+        }
+        let token = text[start...]
+        guard !token.isEmpty else { return false }
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        if parts.allSatisfy({ $0.count == 1 && $0.first!.isLetter }) { return true }
+        return abbreviations.contains(token.lowercased())
     }
 
     /// "word" + space + space → "word. " only after a word character (not after punctuation or emoji).
