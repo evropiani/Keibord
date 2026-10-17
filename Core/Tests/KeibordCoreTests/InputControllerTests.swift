@@ -1045,6 +1045,27 @@ final class InputControllerTests: XCTestCase {
         XCTAssertEqual(doc.text, "so schön ")
     }
 
+    func testInsertTextWithoutCommitInURLField() {
+        c.configure(field: FieldContext(kind: .url, keyboardVariant: .url, autocapitalization: .none, autocorrectionAllowed: false))
+        type("orf")
+        c.handle(.insertText(".at", commitsWord: false))
+        XCTAssertEqual(doc.text, "orf.at")
+        XCTAssertTrue(sink.events.isEmpty)
+    }
+
+    func testWebSearchFieldIsProse() {
+        c.configure(field: FieldContext(kind: .webSearch, keyboardVariant: .webSearch, autocapitalization: .none, returnKind: .search))
+        type("teh\n")
+        XCTAssertEqual(doc.text, "the\n")
+        XCTAssertEqual(sink.commits.last?.final, "the")
+    }
+
+    func testWordsModeCapitalisesAfterOpeningBracket() {
+        c.configure(field: FieldContext(kind: .organization, autocapitalization: .words))
+        type("acme (austria) gmbh")
+        XCTAssertEqual(doc.text, "Acme (Austria) Gmbh")
+    }
+
     func testEmojiInsertCommitsWordWithoutCorrection() {
         c.configure(field: noAutoCap)
         type("teh")
