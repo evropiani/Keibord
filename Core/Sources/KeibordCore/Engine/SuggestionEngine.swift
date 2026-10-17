@@ -15,6 +15,10 @@ public final class SuggestionEngine: SuggestionProviding {
     private var supplementaryKnown: Set<String> = []
     private var profile = PersonalInfo()
     private var lastLanguages: [KeyboardLanguage] = []
+    /// The word of the last correction query: what the user typed before the word was committed.
+    private var lastTypedWord = ""
+    /// Accented words committed per dictionary: typed with their accents / typed without them.
+    private var accentHabit: [String: (typed: Double, omitted: Double)] = [:]
 
     /// Edit costs, tuned on the evaluation set in `EngineQualityTests` (transpositions such as "freind"
     /// and missing letters are common slips; an extra letter is rarer and often a deliberate
@@ -55,6 +59,28 @@ public final class SuggestionEngine: SuggestionProviding {
     /// Minimum zipf of a case correction for words of four or five letters ("brea" ≠ "Brea"). Longer
     /// capitalised forms are mostly nouns and need no minimum ("schwammerl" → "Schwammerl").
     public var caseCorrectionMinZipf: Double = 3
+    /// A valid typed word becomes an accented word when that is this many bits more likely once the
+    /// omitted accents are paid for (`accentOmissionCost`): "mire" (an English word) → "mirë", "uber" →
+    /// "über", and "ne" → "në" once the user is known to leave out "ë".
+    public var knownWordAccentMargin: Double = 2
+    /// A word that is only known in some enabled languages is corrected into another enabled language
+    /// when that correction is this many bits more likely ("teh" is a rare Albanian word: "the").
+    public var crossLanguageMargin: Double = 8
+    /// Maximum edit cost of such a cross-language correction (one slip, transposition or missing letter).
+    public var crossLanguageMaxCost: Double = 8
+    /// Bits taken from the lower-case twin of a German noun ("quatsch" / "Quatsch", "ende" / "Ende") when
+    /// the noun is the dominant form, so that typing it in lower case is corrected.
+    public var nounTwinDiscount: Double = 5
+    /// Minimum zipf of such a dominant noun: below it ties are mostly curated interjections ("Baba"/"baba").
+    public var nounTwinMinZipf: Double = 4
+    /// Extra margin for replacing a word of the layout language by a word of another language ("ate" stays
+    /// English on the English keyboard instead of becoming the Albanian "atë").
+    public var layoutLanguageMargin: Double = 4
+    /// Extra margin for restoring a valid word into the accented word of a language the user is not
+    /// currently writing in ("ate" → "atë" needs Albanian context; "une" → "unë" is clear without).
+    public var foreignAccentMargin: Double = 4
+    /// A word belongs to the languages that know it at most this much (zipf) below its best frequency.
+    public var nativeZipfGap: Double = 1.5
 
     public init(lexiconProvider: @escaping (KeyboardLanguage) -> WordLexicon?) {
         self.lexiconProvider = lexiconProvider
@@ -142,7 +168,7 @@ public final class SuggestionEngine: SuggestionProviding {
     public func isKnownWord(_ word: String, languages: [KeyboardLanguage]) -> Bool {
         let key = TextUnits.lookupKey(word)
         guard !key.isEmpty else { return false }
-        if supplementaryKnown.contains(key) { return true }
+        if supplementaryKnown.contains(key) || Self.isBuiltInWord(key, languages: languages) { return true }
         if let user = userLexicon, !user.lookup(key: key).isEmpty { return true }
         for language in languages {
             if let lex = lexicon(for: language), !lex.lookup(key: key).isEmpty { return true }
@@ -155,18 +181,66 @@ public final class SuggestionEngine: SuggestionProviding {
         var best: (KeyboardLanguage, Double)?
         for language in languages {
             guard let lex = lexicon(for: language), let id = lex.lookup(key: key).first else { continue }
-            let z = lex.zipf(id) + (language == languages.first ? 0.3 : 0)
+            // Frequency in bits plus the language prior (layout language, recent words).
+            let z = lex.log2Prob(id) + prior(language, languages)
             if best == nil || z > best!.1 { best = (language, z) }
         }
         return best?.0 ?? detector.mostLikely(among: languages)
     }
 
     public func noteCommitted(word: String, language: KeyboardLanguage?) {
+        let typed = lastTypedWord
+        lastTypedWord = ""
+        noteAccentHabit(typed: typed, final: word, language: language)
         let languages = lastLanguages
         guard languages.count > 1 else { return }
+        detector.observe(knownIn: nativeLanguages(of: word, among: languages), among: languages)
+    }
+
+    /// The languages `word` most likely belongs to: those knowing it at most `nativeZipfGap` below its best
+    /// frequency. "per" is Italian (English and German know it too, but rarely use it); "ok" is everybody's.
+    func nativeLanguages(of word: String, among languages: [KeyboardLanguage]) -> [KeyboardLanguage] {
         let key = TextUnits.lookupKey(word)
-        let known = languages.filter { lexicon(for: $0).map { !$0.lookup(key: key).isEmpty } ?? false }
-        detector.observe(knownIn: known, among: languages)
+        var known: [(language: KeyboardLanguage, zipf: Double)] = []
+        for language in languages {
+            guard let lex = lexicon(for: language), let z = lex.lookup(key: key).map({ lex.zipf($0) }).max() else { continue }
+            known.append((language, z))
+        }
+        guard let best = known.map(\.zipf).max() else { return [] }
+        return known.filter { $0.zipf >= best - nativeZipfGap }.map(\.language)
+    }
+
+    /// Learns whether the user types accents: an accented word committed after typing it without its
+    /// accents ("eshte" → "është", also when picked from the bar) counts as omitted, typed as is counts as typed.
+    private func noteAccentHabit(typed: String, final: String, language: KeyboardLanguage?) {
+        let finalKey = TextUnits.lookupKey(final)
+        let typedKey = TextUnits.lookupKey(typed)
+        let folded = Diacritics.fold(finalKey)
+        guard !typedKey.isEmpty, folded != finalKey, Diacritics.fold(typedKey) == folded,
+              let language = language ?? lastLanguages.first else { return }
+        var habit = accentHabit[language.dictionaryID] ?? (0, 0)
+        if typedKey == finalKey {
+            habit.typed += 1
+        } else if Diacritics.fold(typedKey) == typedKey {
+            habit.omitted += 1
+        } else {
+            return
+        }
+        // Recent behaviour matters most: keep the counts small.
+        if habit.typed + habit.omitted > 40 {
+            habit.typed *= 0.5
+            habit.omitted *= 0.5
+        }
+        accentHabit[language.dictionaryID] = habit
+    }
+
+    /// Bits for each accent left out of an accented word of `language`: −log2 of the share of accented words
+    /// the user types without their accents (learned, starting from `accentOmissionPrior`).
+    func accentOmissionCost(_ language: KeyboardLanguage) -> Double {
+        let prior = Self.accentOmissionPrior[language.dictionaryID] ?? (typed: 3, omitted: 1)
+        let habit = accentHabit[language.dictionaryID] ?? (0, 0)
+        let omitted = prior.omitted + habit.omitted
+        return -log2(omitted / (omitted + prior.typed + habit.typed))
     }
 
     public func suggest(_ query: SuggestionQuery) -> SuggestionResult {
@@ -186,6 +260,7 @@ public final class SuggestionEngine: SuggestionProviding {
             guard query.predictionsEnabled else { return .empty }
             return SuggestionResult(suggestions: predictions(query, languages: languages))
         }
+        lastTypedWord = word
         return corrections(query, languages: languages)
     }
 
@@ -225,17 +300,44 @@ public final class SuggestionEngine: SuggestionProviding {
         return lex.successors(of: id, limit: limit)
     }
 
-    /// log2 P(next | prev) table for one lexicon.
-    private func successorTable(_ lex: WordLexicon, previous: String?) -> [Int: Double] {
+    /// log2 P(next | prev) table for one lexicon, by lookup key: bigrams are stored for the most frequent
+    /// form of a key only, but apply to every casing of it ("keine zeit" also supports "Zeit").
+    private func successorTable(_ lex: WordLexicon, previous: String?) -> [String: Double] {
         guard let previous = previous else { return [:] }
-        var table: [Int: Double] = [:]
-        for s in successors(lex, previous: previous, limit: 256) { table[s.id] = s.log2Prob }
+        var table: [String: Double] = [:]
+        for s in successors(lex, previous: previous, limit: 256) {
+            let key = TextUnits.lookupKey(lex.word(s.id))
+            if table[key] == nil { table[key] = s.log2Prob }
+        }
         return table
     }
 
     /// The word before the current one, unless it ended the previous sentence (no bigram across ". ").
     private func previousWord(_ query: SuggestionQuery) -> String? {
         query.isSentenceStart ? nil : query.previousWords.last
+    }
+
+    /// Language-model context of one query: the previous word and its successor tables per language.
+    struct Context {
+        var previous: String?
+        var successors: [KeyboardLanguage: [String: Double]] = [:]
+    }
+
+    func makeContext(_ query: SuggestionQuery, languages: [KeyboardLanguage]) -> Context {
+        var context = Context(previous: previousWord(query))
+        guard context.previous != nil else { return context }
+        for language in languages {
+            guard let lex = lexicon(for: language) else { continue }
+            context.successors[language] = successorTable(lex, previous: context.previous)
+        }
+        return context
+    }
+
+    /// Language-model score (bits) of word `id` of `lex` after the context's previous word.
+    private func languageScore(_ lex: WordLexicon, _ language: KeyboardLanguage, _ id: Int, _ context: Context) -> Double {
+        let word = lex.word(id)
+        let bigram = userBigramLog2(context.previous, word) ?? context.successors[language]?[TextUnits.lookupKey(word)]
+        return languageModel(unigram: lex.log2Prob(id), bigram: bigram)
     }
 
     private func userBigramLog2(_ previous: String?, _ word: String) -> Double? {
@@ -341,12 +443,13 @@ public final class SuggestionEngine: SuggestionProviding {
     }
 
     /// All correction / completion candidates for the current word, best first.
-    func rankedCandidates(_ query: SuggestionQuery, languages: [KeyboardLanguage]) -> [Candidate] {
+    func rankedCandidates(_ query: SuggestionQuery, languages: [KeyboardLanguage], context: Context? = nil) -> [Candidate] {
         let typed = query.currentWord
         let typedKey = TextUnits.lookupKey(typed)
         let chars = Array(typedKey)
         guard !chars.isEmpty, chars.count <= 30 else { return [] }
-        let previous = previousWord(query)
+        let context = context ?? makeContext(query, languages: languages)
+        let previous = context.previous
         let typedHasUppercase = Casing.hasUppercase(typed)
 
         let taps: [TapInput]
@@ -389,7 +492,6 @@ public final class SuggestionEngine: SuggestionProviding {
         for language in languages {
             guard let lex = lexicon(for: language) else { continue }
             let p = prior(language, languages)
-            let succ = successorTable(lex, previous: previous)
             /// Typed in lower case: a capitalised form loses a tie against the lower-case form of the same
             /// key (both have the corpus frequency of the key): "arbeizen" → "arbeiten", not "Arbeiten".
             var hasLowercaseForm: [String: Bool] = [:]
@@ -402,7 +504,7 @@ public final class SuggestionEngine: SuggestionProviding {
                 return hasLowercaseForm[key]! ? casingTieBreak : 0
             }
             func lm(_ id: Int, _ word: String) -> Double {
-                languageModel(unigram: lex.log2Prob(id), bigram: userBigramLog2(previous, word) ?? succ[id])
+                languageScore(lex, language, id, context)
             }
             for m in lex.fuzzySearch(taps: taps, costs: costModel, maxCost: maxCost, limit: 30) {
                 let w = lex.word(m.id)
@@ -454,12 +556,14 @@ public final class SuggestionEngine: SuggestionProviding {
         let typed = query.currentWord
         let typedKey = TextUnits.lookupKey(typed)
         guard !typedKey.isEmpty else { return .empty }
-        let ranked = rankedCandidates(query, languages: languages)
+        let context = makeContext(query, languages: languages)
+        let ranked = rankedCandidates(query, languages: languages, context: context)
         let typedIsKnown = isKnownWord(typed, languages: languages)
 
         var autocorrection: Suggestion?
         if query.autocorrectEnabled, query.field.autocorrectAllowed {
-            autocorrection = decideAutocorrection(query, typedKey: typedKey, typedIsKnown: typedIsKnown, ranked: ranked, languages: languages)
+            autocorrection = decideAutocorrection(query, typedKey: typedKey, typedIsKnown: typedIsKnown, ranked: ranked,
+                                                  languages: languages, context: context)
         }
 
         // Bar layout
@@ -485,22 +589,22 @@ public final class SuggestionEngine: SuggestionProviding {
         return SuggestionResult(suggestions: bar, autocorrection: autocorrection)
     }
 
-    private func decideAutocorrection(_ query: SuggestionQuery, typedKey: String, typedIsKnown: Bool, ranked: [Candidate], languages: [KeyboardLanguage]) -> Suggestion? {
+    private func decideAutocorrection(_ query: SuggestionQuery, typedKey: String, typedIsKnown: Bool, ranked: [Candidate],
+                                      languages: [KeyboardLanguage], context: Context) -> Suggestion? {
         let typed = query.currentWord
         if let phrase = shortcuts[typedKey] {
             return Suggestion(text: phrase, kind: .shortcut, isAutocorrect: true)
         }
         guard !typed.contains(where: { $0.isNumber }), !Casing.hasInnerCapitals(typed) else { return nil }
-        let n = typedKey.count
-        let best = ranked.first { $0.kind == .correction && TextUnits.lookupKey($0.text) != typedKey }
         if typedIsKnown {
-            return caseCorrection(typed: typed, key: typedKey, languages: languages, best: best)
+            return knownWordCorrection(query, typedKey: typedKey, ranked: ranked, languages: languages, context: context)
         }
-        guard n >= 2, let correction = best else { return nil }
+        let n = typedKey.count
+        guard n >= 2, let correction = ranked.first(where: { $0.kind == .correction && TextUnits.lookupKey($0.text) != typedKey }) else { return nil }
         // The typed letters start a much more likely word: the user is still typing it.
         if let completion = ranked.first(where: { $0.kind == .completion }), completion.score - prefixStopPenalty > correction.score { return nil }
         guard correction.cost <= 4 + 2 * Double(n) else { return nil }
-        guard correction.score - unknownWordLog2Prob >= requiredMargin(query, typedLength: n, correction: correction) else { return nil }
+        guard correction.score - unknownWordLog2Prob >= requiredMargin(query, typedKey: typedKey, correction: correction) else { return nil }
         guard query.accentRestoration || Diacritics.fold(correction.text) != Diacritics.fold(typed) else { return nil }
         return Suggestion(text: correction.text, kind: .correction, isAutocorrect: true, language: correction.language)
     }
@@ -508,8 +612,12 @@ public final class SuggestionEngine: SuggestionProviding {
     /// Bits a correction must beat the unknown-word baseline by. Short unknown strings are often slang
     /// or abbreviations ("thx", "hdl") that are one edit away from some frequent word, and a capitalised
     /// word in mid-sentence whose correction is a lower-case word is usually a name ("Senad" ≠ "send").
-    private func requiredMargin(_ query: SuggestionQuery, typedLength n: Int, correction: Candidate) -> Double {
-        var margin = autocorrectMargin + (n < shortWordMargins.count ? shortWordMargins[n] : 0)
+    /// Restoring accents or applying a spelling rule ("gruss" → "Gruß", "cka" → "çka") is no such guess.
+    private func requiredMargin(_ query: SuggestionQuery, typedKey: String, correction: Candidate) -> Double {
+        let n = typedKey.count
+        var margin = autocorrectMargin
+        let respelling = correction.viaSpellingRule || Diacritics.fold(TextUnits.lookupKey(correction.form)) == Diacritics.fold(typedKey)
+        if n < shortWordMargins.count, !respelling { margin += shortWordMargins[n] }
         let typed = query.currentWord
         if !query.isSentenceStart, Casing.startsUppercase(typed), !Casing.isAllCaps(typed), !correction.hasCapitalisedForm {
             margin += properNounMargin
@@ -517,54 +625,211 @@ public final class SuggestionEngine: SuggestionProviding {
         return margin
     }
 
-    /// "haus" → "Haus" when the capitalised dictionary forms of the key (German nouns, English "I") are
-    /// far more likely than the forms typed as is, weighted by language prior.
-    private func caseCorrection(typed: String, key: String, languages: [KeyboardLanguage], best: Candidate?) -> Suggestion? {
-        guard !Casing.hasUppercase(typed) else { return nil }
-        if supplementaryKnown.contains(key) { return nil }
+    // MARK: Known words
+
+    /// A typed word that some dictionary knows is only replaced by
+    /// * its capitalised form when that is far more likely than the forms shown as typed ("haus" → "Haus",
+    ///   "wien" → "Wien", "i" → "I", "quatsch" → "Quatsch"),
+    /// * an accented word that is much more likely in context than every reading of the typed word, once
+    ///   the omitted accents are paid for ("mire" is a rare English word, "mirë" a frequent Albanian one;
+    ///   "uber" → "über"; "c'e" → "c'è"),
+    /// * a correction into another enabled language that is far more likely than the rare word typed
+    ///   ("teh" is an Albanian word, but with English enabled it is "the").
+    /// The option with the highest score wins ("jane" → "janë" rather than the name "Jane").
+    private func knownWordCorrection(_ query: SuggestionQuery, typedKey: String, ranked: [Candidate], languages: [KeyboardLanguage],
+                                     context: Context) -> Suggestion? {
+        let typed = query.currentWord
+        // Contact names, text replacements and chat abbreviations are the user's own words.
+        if supplementaryKnown.contains(typedKey) || Self.isBuiltInWord(typedKey, languages: languages) { return nil }
+        if let elided = elisionCorrection(query, typedKey: typedKey, languages: languages, context: context) { return elided }
+
+        let typedLower = !Casing.hasUppercase(typed)
         var keepMass = 0.0
+        var layoutKeepMass = 0.0
+        var decisiveLowercase = false
+        var knownIn: Set<String> = []
         var capitalised: [(form: String, score: Double, zipf: Double, language: KeyboardLanguage?)] = []
-        func add(_ form: String, _ score: Double, _ zipf: Double, _ language: KeyboardLanguage?) {
-            if Casing.startsUppercase(form), !Casing.isAllCaps(form) {
-                capitalised.append((form, score, zipf, language))
-            } else {
-                // The typed form itself, or an acronym ("LOL") that may well be typed in lower case.
-                keepMass += pow(2, score)
-            }
-        }
+        var userForms = 0
         if let user = userLexicon {
-            for id in user.lookup(key: key) {
+            for id in user.lookup(key: typedKey) {
                 let w = user.word(id)
                 if w == typed { return nil }
-                add(w, user.log2Prob(id) + 1, user.zipf(id), nil)
+                userForms += 1
+                let score = languageModel(unigram: user.log2Prob(id), bigram: userBigramLog2(context.previous, w)) + 1
+                if typedLower, Casing.startsUppercase(w), !Casing.isAllCaps(w) {
+                    capitalised.append((w, score, user.zipf(id), nil))
+                } else {
+                    keepMass += pow(2, score)
+                }
             }
         }
+        let verbContext = context.previous.map { Self.germanPronouns.contains(TextUnits.lookupKey($0)) } ?? false
         for language in languages {
             guard let lex = lexicon(for: language) else { continue }
+            let ids = lex.lookup(key: typedKey)
+            guard !ids.isEmpty else { continue }
+            knownIn.insert(language.dictionaryID)
             let p = prior(language, languages)
-            for id in lex.lookup(key: key) {
+            let nounTwin = typedLower && !verbContext && isDominantNoun(lex, language: language, ids: ids, key: typedKey)
+            for id in ids {
                 let w = lex.word(id)
-                // A lower-case form in the layout language is decisive ("ned", "jo" are Austrian words).
-                if language == languages.first, !Casing.hasUppercase(w) { return nil }
-                add(w, lex.log2Prob(id) + p, lex.zipf(id), language)
+                let score = languageScore(lex, language, id, context) + p
+                if Casing.apply(typed: typed, to: w) == typed || (typedLower && Casing.isAllCaps(w)) {
+                    // Shown as typed, or an acronym ("LOL") that may well be typed in lower case.
+                    let lowercase = !Casing.hasUppercase(w)
+                    // A lower-case form in the layout language is decisive ("ned", "jo" are Austrian words).
+                    if lowercase, language == languages.first, !nounTwin { decisiveLowercase = true }
+                    let mass = pow(2, lowercase && nounTwin ? score - nounTwinDiscount : score)
+                    keepMass += mass
+                    if language == languages.first { layoutKeepMass += mass }
+                } else if typedLower, Casing.startsUppercase(w) {
+                    capitalised.append((w, score, lex.zipf(id), language))
+                }
             }
         }
-        guard let top = capitalised.max(by: { $0.score < $1.score }), top.form != typed else { return nil }
-        let minZipf = key.count <= 3 ? shortCaseCorrectionMinZipf : (key.count <= 5 ? caseCorrectionMinZipf : 0)
-        guard top.zipf >= minZipf else { return nil }
-        if keepMass > 0 {
-            let capitalisedMass = capitalised.reduce(0) { $0 + pow(2, $1.score) }
-            guard log2(capitalisedMass) - log2(keepMass) >= caseCorrectionMargin else { return nil }
+        let keepScore = keepMass > 0 ? log2(keepMass) : -Double.infinity
+
+        var options: [(suggestion: Suggestion, score: Double)] = []
+        if !decisiveLowercase, let option = caseOption(typedKey: typedKey, keepScore: keepScore, capitalised: capitalised, ranked: ranked) {
+            options.append(option)
         }
+        // Words the user taught the keyboard are deliberate: only their casing is corrected.
+        if userForms == 0 {
+            // The layout language's reading of the word is the main one ("ate" on the English keyboard, not
+            // "per" on the German one).
+            let layout = layoutKeepMass >= keepMass / 2 && keepMass > 0 ? languages.first : nil
+            // A capitalised word in mid-sentence is probably a name ("Dardan" ≠ "Daran").
+            let name = !query.isSentenceStart && Casing.startsUppercase(typed) && !Casing.isAllCaps(typed)
+            let keep = keepScore + (name ? properNounMargin : 0)
+            if query.accentRestoration,
+               let option = knownWordAccentOption(typedKey: typedKey, keepScore: keep, ranked: ranked, knownIn: knownIn,
+                                                  languages: languages, layoutLanguage: layout) {
+                options.append(option)
+            }
+            if keepMass > 0,
+               let option = crossLanguageOption(typedKey: typedKey, keepScore: keep, knownIn: knownIn, ranked: ranked, layoutLanguage: layout) {
+                options.append(option)
+            }
+        }
+        return options.max(by: { $0.score < $1.score })?.suggestion
+    }
+
+    /// "haus" → "Haus" when the capitalised forms of the key (German nouns, English "I", names) are far more
+    /// likely than the forms shown as typed.
+    private func caseOption(typedKey: String, keepScore: Double, capitalised: [(form: String, score: Double, zipf: Double, language: KeyboardLanguage?)],
+                            ranked: [Candidate]) -> (suggestion: Suggestion, score: Double)? {
+        guard let top = capitalised.max(by: { $0.score < $1.score }) else { return nil }
+        let n = typedKey.count
+        let minZipf = n <= 3 ? shortCaseCorrectionMinZipf : (n <= 5 ? caseCorrectionMinZipf : 0)
+        guard top.zipf >= minZipf else { return nil }
+        let capitalisedScore = log2(capitalised.reduce(0) { $0 + pow(2, $1.score) })
+        guard capitalisedScore - keepScore >= caseCorrectionMargin else { return nil }
         // Known only as a capitalised name, but a spelling rule away from a lower-case word, or one cheap
         // edit away from a far more likely word: "weiss" → "weiß", not the surname "Weiss"; "center" →
         // "centre" in British English, not the proper noun "Center".
-        if keepMass == 0, let best = best, best.cost <= cheapCorrectionCost,
-           best.viaSpellingRule && !best.hasCapitalisedForm || best.score - (top.score + log2(0.4)) >= autocorrectMargin {
-            return Suggestion(text: best.text, kind: .correction, isAutocorrect: true, language: best.language)
+        if keepScore == -Double.infinity,
+           let best = ranked.first(where: { $0.kind == .correction && TextUnits.lookupKey($0.text) != typedKey }),
+           best.cost <= cheapCorrectionCost,
+           best.viaSpellingRule && !best.hasCapitalisedForm || best.score - top.score >= autocorrectMargin {
+            return (Suggestion(text: best.text, kind: .correction, isAutocorrect: true, language: best.language), best.score)
         }
-        return Suggestion(text: top.form, kind: .correction, isAutocorrect: true, language: top.language)
+        return (Suggestion(text: top.form, kind: .correction, isAutocorrect: true, language: top.language), top.score)
     }
+
+    /// A German key whose capitalised form is the noun people mean although a lower-case twin exists: the
+    /// noun is listed first (the dictionary breaks frequency ties by the casing books use: "Quatsch",
+    /// "Ende", "Schule") or it is one of `germanNouns`.
+    private func isDominantNoun(_ lex: WordLexicon, language: KeyboardLanguage, ids: [Int], key: String) -> Bool {
+        guard language == .deAT, let first = ids.first else { return false }
+        let firstForm = lex.word(first)
+        if Self.germanNouns.contains(key) { return true }
+        guard Casing.startsUppercase(firstForm), !Casing.isAllCaps(firstForm), lex.zipf(first) >= nounTwinMinZipf else { return false }
+        return ids.contains { !Casing.hasUppercase(lex.word($0)) && lex.zipf($0) >= lex.zipf(first) }
+    }
+
+    /// The accented reading of a valid typed word ("mire" → "mirë"), if it is `knownWordAccentMargin` bits
+    /// more likely than the typed readings after paying `accentOmissionCost` per missing accent (plus
+    /// `layoutLanguageMargin` to leave `layoutLanguage`, which knows the typed word, and `foreignAccentMargin`
+    /// for a language that does not know the typed word and is not the one the user is writing in).
+    private func knownWordAccentOption(typedKey: String, keepScore: Double, ranked: [Candidate], knownIn: Set<String>,
+                                       languages: [KeyboardLanguage], layoutLanguage: KeyboardLanguage?) -> (suggestion: Suggestion, score: Double)? {
+        // Someone typing some accents ("ketë", "nö") typed this word the way they meant it.
+        let folded = Diacritics.fold(typedKey)
+        guard folded == typedKey else { return nil }
+        var best: (candidate: Candidate, score: Double)?
+        for c in ranked where c.kind == .correction {
+            guard let language = c.language else { continue }
+            let key = TextUnits.lookupKey(c.form)
+            guard key != typedKey, key.count == typedKey.count, Diacritics.fold(key) == folded else { continue }
+            let accents = zip(key, typedKey).reduce(0) { $0 + ($1.0 != $1.1 ? 1 : 0) }
+            var score = c.score + c.cost - Double(accents) * accentOmissionCost(language)
+            if let layout = layoutLanguage, language.dictionaryID != layout.dictionaryID { score -= layoutLanguageMargin }
+            if !knownIn.contains(language.dictionaryID), prior(language, languages) < 1 { score -= foreignAccentMargin }
+            if best == nil || score > best!.score { best = (c, score) }
+        }
+        guard let found = best, found.score - keepScore >= knownWordAccentMargin else { return nil }
+        return (Suggestion(text: found.candidate.text, kind: .correction, isAutocorrect: true, language: found.candidate.language), found.score)
+    }
+
+    /// The best correction, if it belongs to a language that does not know the typed word and beats every
+    /// reading of the typed word by `crossLanguageMargin` ("teh" → "the").
+    private func crossLanguageOption(typedKey: String, keepScore: Double, knownIn: Set<String>, ranked: [Candidate],
+                                     layoutLanguage: KeyboardLanguage?) -> (suggestion: Suggestion, score: Double)? {
+        guard let c = ranked.first(where: { $0.kind == .correction && TextUnits.lookupKey($0.form) != typedKey }),
+              let language = c.language, !knownIn.contains(language.dictionaryID),
+              c.cost <= crossLanguageMaxCost,
+              Diacritics.fold(TextUnits.lookupKey(c.form)) != Diacritics.fold(typedKey),
+              c.score - keepScore >= crossLanguageMargin + (layoutLanguage == nil ? 0 : layoutLanguageMargin) else { return nil }
+        return (Suggestion(text: c.text, kind: .correction, isAutocorrect: true, language: language), c.score)
+    }
+
+    /// Italian: after an elided word ("c'", "dov'", "com'", "cos'") a bare "e" can only be the verb, so
+    /// "c'e" → "c'è" (the input controller hands the engine the word after the apostrophe).
+    private func elisionCorrection(_ query: SuggestionQuery, typedKey: String, languages: [KeyboardLanguage], context: Context) -> Suggestion? {
+        guard query.accentRestoration, typedKey == "e", let previous = context.previous, let last = previous.last,
+              TextUnits.apostrophes.contains(last), languages.contains(.itIT), let lex = lexicon(for: .itIT),
+              !lex.lookup(key: TextUnits.lookupKey(previous)).isEmpty else { return nil }
+        return Suggestion(text: Casing.apply(typed: query.currentWord, to: "è"), kind: .correction, isAutocorrect: true, language: .itIT)
+    }
+
+    // MARK: Word lists
+
+    /// Chat abbreviations missing from the dictionaries, by dictionary: known words that are never corrected.
+    static let builtInWords: [String: Set<String>] = {
+        let chat: Set<String> = ["lol", "omg", "btw", "xd", "ok", "thx", "pls", "plz"]
+        let english: Set<String> = ["etc", "idk", "tbh", "imo", "imho", "brb", "asap", "fyi", "lmk", "lmao", "rofl", "ngl", "smh", "tmrw",
+                                    "irl", "ty", "np", "bday", "gf", "bf", "dm", "ttyl", "hbu", "wyd", "nvm"]
+        return [
+            "de-AT": chat.union(["usw", "bzw", "zb", "evtl", "ggf", "inkl", "exkl", "vgl", "bspw", "sog", "ca", "mfg", "lg", "glg", "hdl",
+                                 "hdgdl", "vllt", "vlt", "sry", "ka", "kA", "wg", "bzgl", "zzgl", "usf"].map { $0.lowercased() }),
+            "en-GB": chat.union(english),
+            "en-US": chat.union(english),
+            "sq": chat.union(["flm", "dmth", "psh", "nqs", "rrfsh"]),
+            "it": chat.union(["cmq", "nn", "xke", "xké", "xche", "xché", "tvb", "tvtb", "qlc", "qlcs", "grz", "cvd", "tt"]),
+        ]
+    }()
+
+    static func isBuiltInWord(_ key: String, languages: [KeyboardLanguage]) -> Bool {
+        languages.contains { builtInWords[$0.dictionaryID]?.contains(key) ?? false }
+    }
+
+    /// German nouns whose lower-case twin comes first in the dictionary (very frequent keys lose a little
+    /// frequency on their capitalised form) although people typing the key almost always mean the noun.
+    static let germanNouns: Set<String> = ["zeit", "angst", "freund", "dank"]
+
+    /// After a subject pronoun a German lower-case twin is the verb: "ich sorge", "wir essen".
+    static let germanPronouns: Set<String> = ["ich", "i", "du", "er", "sie", "es", "wir", "ihr", "man"]
+
+    /// Prior pseudo-counts of accented words typed with / without their accents, by dictionary: German
+    /// layouts have umlaut keys (10 % left out); Albanian "ë" / "ç" and Italian accents are often skipped
+    /// (33 %). The counts are small so that a user's habit takes over after a few words.
+    static let accentOmissionPrior: [String: (typed: Double, omitted: Double)] = [
+        "de-AT": (typed: 9, omitted: 1),
+        "sq": (typed: 2, omitted: 1),
+        "it": (typed: 2, omitted: 1),
+        "en-GB": (typed: 3, omitted: 1),
+        "en-US": (typed: 3, omitted: 1),
+    ]
 
     private func predictions(_ query: SuggestionQuery, languages: [KeyboardLanguage]) -> [Suggestion] {
         let previous = previousWord(query)
@@ -589,7 +854,10 @@ public final class SuggestionEngine: SuggestionProviding {
                 guard let lex = lexicon(for: language) else { continue }
                 let p = prior(language, languages)
                 for s in successors(lex, previous: previous, limit: 6) {
-                    offer(lex.word(s.id), s.log2Prob + p, language)
+                    // Bigrams are stored under the most frequent form of a key: "keine" → "zeit" means "Zeit".
+                    var w = lex.word(s.id)
+                    if language == .deAT, Self.germanNouns.contains(TextUnits.lookupKey(w)) { w = Casing.capitalizingFirstLetter(w) }
+                    offer(w, s.log2Prob + p, language)
                 }
             }
         }

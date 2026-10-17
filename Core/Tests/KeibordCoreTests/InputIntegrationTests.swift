@@ -153,7 +153,7 @@ final class InputIntegrationTests: XCTestCase {
             ("ich {w>e}eiß es nicht. ", "Ich weiß es nicht. "),
             ("das war z.b. gestern. ", "Das war z.b. gestern. "),
             ("ich gehe ins buro. ", "Ich gehe ins Büro. "),
-            ("so'n quatsch, ich hab's gesehen. ", "So’n quatsch, ich hab’s gesehen. "),
+            ("so'n quatsch, ich hab's gesehen. ", "So’n Quatsch, ich hab’s gesehen. "),
             ("das ist \"super\"! ", "Das ist „super“! "),
         ])
     }
