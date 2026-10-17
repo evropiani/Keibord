@@ -247,6 +247,13 @@ final class BackupTests: XCTestCase {
         // A backup exported without personal details keeps the details on this device.
         let (_, kept, _) = BackupFile.apply(samplePayload(profile: false), mode: .replace, to: current)
         XCTAssertEqual(kept, current.profile)
+        // A hand-edited or damaged model is cleaned up like a merged one: blocked words stay unlearned.
+        var inconsistent = samplePayload()
+        inconsistent.userModel.words["Oida"] = LearnedWord(count: 5, lastUsedDay: 3)
+        inconsistent.userModel.words["unused"] = LearnedWord(count: 0, lastUsedDay: 3)
+        inconsistent.userModel.bigrams[UserModel.bigramKey("oida", "geh")] = 2
+        inconsistent.userModel.bigrams[UserModel.bigramKey("never", "seen")] = 0
+        XCTAssertEqual(BackupFile.apply(inconsistent, mode: .replace, to: current).2, payload.userModel)
         // The imported model is pruned to the usual limits.
         var huge = samplePayload()
         for i in 0..<30_050 { huge.userModel.words["w\(i)x"] = LearnedWord(count: 1, lastUsedDay: i) }

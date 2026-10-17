@@ -148,7 +148,9 @@ public enum BackupFile {
     public static func apply(_ payload: BackupPayload, mode: ImportMode, to current: (settings: KeibordSettings, profile: PersonalProfile, model: UserModel)) -> (KeibordSettings, PersonalProfile, UserModel) {
         switch mode {
         case .replace:
-            var model = payload.userModel
+            // Merged into an empty model so the imported data is cleaned up the same way: no learned
+            // words or word pairs of blocked words, no unused entries.
+            var model = UserModel().merged(with: payload.userModel)
             model.prune()
             return (payload.settings, payload.profile ?? current.profile, model)
         case .merge:
