@@ -164,8 +164,7 @@ public enum LayoutFactory {
             characters = ["@", "."]
         case .url:
             fill = KeySpec(id: "dotcom", action: .insert(".com"), label: ".com",
-                           alternates: [".at", ".de", ".com", ".net", ".org", ".eu", ".it", ".al", ".co.uk"],
-                           width: .fill, style: .character)
+                           alternates: Alternates.topLevelDomains(for: lang), width: .fill, style: .character)
             characters = [".", "/"]
             fillFirst = false
         case .webSearch:

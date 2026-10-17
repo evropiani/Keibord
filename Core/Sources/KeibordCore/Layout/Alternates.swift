@@ -62,6 +62,13 @@ public enum Alternates {
         "7": ["⅞"],
     ]
 
+    /// Quote keys list the language's own quotation marks first („“ for German/Albanian, “” for
+    /// English/Italian).
+    private static let englishQuotes: [String: [String]] = [
+        "\"": ["“", "”", "„", "«", "»"],
+        "'": ["‘", "’", "‚", "`"],
+    ]
+
     public static func alternates(for key: String, language: KeyboardLanguage) -> [String] {
         let table: [String: [String]]
         switch language.languageCode {
@@ -70,6 +77,22 @@ public enum Alternates {
         case "it": table = italian
         default: table = [:]
         }
+        if language.defaultQuoteStyle == .english, let quotes = englishQuotes[key] { return quotes }
         return table[key] ?? generic[key] ?? symbols[key] ?? []
+    }
+
+    /// Long-press domains of the `.com` key: the language's own country domain first.
+    public static func topLevelDomains(for language: KeyboardLanguage) -> [String] {
+        let first: [String]
+        switch language {
+        case .deAT: first = [".at", ".de"]
+        case .enGB: first = [".co.uk", ".com"]
+        case .enUS: first = [".com", ".net", ".org"]
+        case .sqAL: first = [".al", ".com"]
+        case .sqXK: first = [".com", ".al"]
+        case .itIT: first = [".it", ".com"]
+        }
+        let all = [".at", ".de", ".com", ".net", ".org", ".eu", ".it", ".al", ".co.uk"]
+        return first + all.filter { !first.contains($0) }
     }
 }

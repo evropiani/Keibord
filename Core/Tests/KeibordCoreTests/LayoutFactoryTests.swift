@@ -524,6 +524,32 @@ final class LayoutFactoryTests: XCTestCase {
         }
     }
 
+    func testQuoteAlternatesFollowTheLanguage() {
+        for language in KeyboardLanguage.allCases {
+            let numbers = LayoutFactory.layout(for: LayoutRequest(language: language, base: language.defaultBaseLayout, page: .numbers))
+            let double = numbers.allKeys.first { $0.id == "\"" }!.alternates
+            let single = numbers.allKeys.first { $0.id == "'" }!.alternates
+            let style = language.defaultQuoteStyle
+            XCTAssertEqual(Array(double.prefix(2)), [style.doubleOpen, style.doubleClose], language.rawValue)
+            XCTAssertEqual(Array(single.prefix(2)), [style.singleOpen, style.singleClose], language.rawValue)
+            XCTAssertEqual(Set(double), ["„", "“", "”", "«", "»"], language.rawValue)
+            XCTAssertEqual(Set(single), ["‚", "‘", "’", "`"], language.rawValue)
+        }
+    }
+
+    func testDotComDomainsPerLanguage() {
+        let expectedFirst: [KeyboardLanguage: String] = [.deAT: ".at", .enGB: ".co.uk", .enUS: ".com", .sqAL: ".al", .sqXK: ".com", .itIT: ".it"]
+        for language in KeyboardLanguage.allCases {
+            for page in LayoutPage.allCases {
+                let layout = LayoutFactory.layout(for: LayoutRequest(language: language, base: language.defaultBaseLayout, page: page, variant: .url))
+                let tlds = layout.allKeys.first { $0.id == "dotcom" }!.alternates
+                XCTAssertEqual(tlds.first, expectedFirst[language], language.rawValue)
+                XCTAssertEqual(Set(tlds), [".at", ".de", ".com", ".net", ".org", ".eu", ".it", ".al", ".co.uk"], language.rawValue)
+                XCTAssertEqual(Set(tlds).count, tlds.count, language.rawValue)
+            }
+        }
+    }
+
     func testSymbolAlternates() {
         let l = KeyboardLanguage.deAT
         XCTAssertEqual(Alternates.alternates(for: "-", language: l), ["–", "—", "•"])
