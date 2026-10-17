@@ -424,6 +424,17 @@ final class InputControllerTests: XCTestCase {
         XCTAssertEqual(sink.commits.map(\.final), ["see", "www", "and"], "fragments of addresses are not learned")
     }
 
+    func testNoWordSuggestionsInsideAWordButPredictionsBetweenWords() {
+        engine.completions["hau"] = ["Hause"]
+        engine.predictions = ["Auto"]
+        setDocument("Hau", after: "stür")
+        XCTAssertTrue(c.suggestions.isEmpty, "a completion would only replace the part before the cursor")
+        setDocument("Haus ", after: "tür")
+        XCTAssertEqual(c.suggestions.map(\.text), ["Auto"])
+        c.handle(.suggestion(c.suggestions[0]))
+        XCTAssertEqual(doc.text, "Haus Auto tür")
+    }
+
     func testNoAutocorrectWhenTheCursorIsInsideAWord() {
         c.configure(field: noAutoCap)
         setDocument("teh", after: "x")
@@ -1074,9 +1085,10 @@ final class InputControllerTests: XCTestCase {
         c.handle(.character("b", tap: t, isLetter: true))
         c.handle(.moveCursor(-1))
         XCTAssertEqual(doc.cursor, 1)
-        XCTAssertNil(engine.queries.last?.taps)
         c.handle(.moveCursor(5))
         XCTAssertEqual(doc.cursor, 2)
+        XCTAssertEqual(engine.queries.last?.currentWord, "ab")
+        XCTAssertNil(engine.queries.last?.taps, "taps are gone after the cursor moved")
     }
 
     func testExternalChangeResetsStateAndRecomputesShift() {

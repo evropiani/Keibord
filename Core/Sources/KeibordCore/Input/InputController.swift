@@ -120,7 +120,8 @@ public final class InputController {
         let c = composing(ctx)
         if !taps.isEmpty, taps.count != c.token.count { taps = [] }
         // Never pass what is typed into a password field to the engine, and never show it in the bar.
-        guard !field.isSecure else {
+        // Inside a word ("Hau|stür") a suggestion would only replace the part before the cursor.
+        guard !field.isSecure, c.word.isEmpty || !cursorIsInsideWord else {
             suggestions = []
             autocorrection = nil
             return
