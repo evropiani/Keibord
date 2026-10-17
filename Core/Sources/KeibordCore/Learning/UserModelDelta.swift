@@ -3,8 +3,8 @@ import Foundation
 /// Increments recorded by the keyboard between two flushes to disk. Applying a delta is additive,
 /// so the keyboard and the app can both edit `user-model.json` without losing each other's changes.
 ///
-/// A word entry with a negative count takes back learning (a rejected autocorrection); applying it
-/// lowers the stored count and removes words that drop to zero.
+/// Applying a word entry with a negative count lowers the stored count instead (removing words that
+/// drop to zero, except manually added ones).
 public struct UserModelDelta: Equatable, Sendable {
     public var words: [String: LearnedWord] = [:]
     public var bigrams: [String: Int] = [:]
@@ -12,10 +12,24 @@ public struct UserModelDelta: Equatable, Sendable {
     public var emoji: [String: EmojiStat] = [:]
     public var languageUsage: [String: Int] = [:]
 
+    /// What recording the last committed word added, when autocorrect produced that word.
+    private struct Autocorrection: Sendable {
+        var word: String
+        var bigram: String?
+        var language: String?
+    }
+
+    /// Set by an autocorrected commit and cleared by the next commit or rejection; not part of equality.
+    private var lastAutocorrection: Autocorrection?
+
     public init() {}
 
     public var isEmpty: Bool {
         words.isEmpty && bigrams.isEmpty && touch.isEmpty && emoji.isEmpty && languageUsage.isEmpty
+    }
+
+    public static func == (a: UserModelDelta, b: UserModelDelta) -> Bool {
+        a.words == b.words && a.bigrams == b.bigrams && a.touch == b.touch && a.emoji == b.emoji && a.languageUsage == b.languageUsage
     }
 
     public static func today(_ date: Date = Date()) -> Int { Int((date.timeIntervalSince1970 / 86_400).rounded(.down)) }
@@ -23,22 +37,31 @@ public struct UserModelDelta: Equatable, Sendable {
     public mutating func record(_ event: LearningEvent, day: Int = UserModelDelta.today(), now: Double = Date().timeIntervalSince1970) {
         switch event {
         case let .committedWord(final, _, previous, language, taps, wasAutocorrected):
+            lastAutocorrection = nil
             guard LearningPolicy.isLearnable(final) else { return }
             addWord(final, count: 1, day: day, language: language?.rawValue)
+            var bigram: String?
             if let previous = previous, LearningPolicy.isLearnable(previous) {
-                bigrams[UserModel.bigramKey(previous, final), default: 0] += 1
+                let key = UserModel.bigramKey(previous, final)
+                bigrams[key, default: 0] += 1
+                bigram = key
             }
             if let language = language { languageUsage[language.rawValue, default: 0] += 1 }
-            if !wasAutocorrected, let taps = taps { recordTouches(word: final, taps: taps) }
+            if wasAutocorrected {
+                lastAutocorrection = Autocorrection(word: final, bigram: bigram, language: language?.rawValue)
+            } else if let taps = taps {
+                recordTouches(word: final, taps: taps)
+            }
         case let .rejectedCorrection(typed, correction):
             if LearningPolicy.isLearnable(typed) {
                 addWord(typed, count: 2, day: day, language: nil)
             }
-            // The correction was learned when it was committed (autocorrect then backspace): take that
-            // back so rejected corrections are not reinforced. Applying never drops a count below 0.
-            if LexiconKey.string(correction) != LexiconKey.string(typed), LearningPolicy.isLearnable(correction) {
-                unlearnWord(correction)
-            }
+            // Backspace right after an autocorrection: take back what committing the correction learned,
+            // so a rejected correction is not reinforced (two undos would make it a known word). Picking
+            // the typed word while a correction is only pending committed nothing, so nothing is taken
+            // back: the correction may be a word the user really uses.
+            if let last = lastAutocorrection, last.word == correction { retract(last) }
+            lastAutocorrection = nil
         case .usedEmoji(let e):
             guard !e.isEmpty else { return }
             var stat = emoji[e] ?? EmojiStat(count: 0, lastUsed: now)
@@ -58,11 +81,20 @@ public struct UserModelDelta: Equatable, Sendable {
         words[word] = w
     }
 
-    private mutating func unlearnWord(_ word: String) {
-        // lastUsedDay 0: an unlearn entry never makes a word look recently used.
-        var w = words[word] ?? LearnedWord(count: 0, lastUsedDay: 0)
-        w.count -= 1
-        words[word] = w.count == 0 ? nil : w
+    /// Undoes the increments of an autocorrected commit recorded in this delta.
+    private mutating func retract(_ commit: Autocorrection) {
+        if var w = words[commit.word] {
+            w.count -= 1
+            words[commit.word] = w.count > 0 ? w : nil
+        }
+        if let key = commit.bigram {
+            let count = (bigrams[key] ?? 0) - 1
+            bigrams[key] = count > 0 ? count : nil
+        }
+        if let language = commit.language {
+            let count = (languageUsage[language] ?? 0) - 1
+            languageUsage[language] = count > 0 ? count : nil
+        }
     }
 
     /// Learns where the user taps each letter key. Taps align with the letters of the final word (same

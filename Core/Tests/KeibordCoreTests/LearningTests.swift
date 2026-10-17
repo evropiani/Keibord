@@ -111,51 +111,136 @@ final class LearningTests: XCTestCase {
 
         // Autocorrect "Servas" → "Servus", then backspace: the keyboard records both events.
         var pending = UserModelDelta()
-        let events: [LearningEvent] = [commit("Servus", typed: "Servas", previous: "Na", corrected: true),
-                                       .rejectedCorrection(typed: "Servas", correction: "Servus")]
+        pending.record(commit("Na"), day: 9)
+        pending.record(commit("Servus", typed: "Servas", previous: "Na", corrected: true), day: 9)
+        XCTAssertEqual(pending.bigrams, [UserModel.bigramKey("na", "servus"): 1])
+        pending.record(.rejectedCorrection(typed: "Servas", correction: "Servus"), day: 9)
+        XCTAssertNil(pending.words["Servus"], "commit and rejection cancel out")
+        XCTAssertTrue(pending.bigrams.isEmpty, "the word pair is taken back too")
+        XCTAssertEqual(pending.languageUsage, ["de-AT": 1], "only \"Na\" still counts")
+        XCTAssertEqual(pending.words["Servas"], LearnedWord(count: 2, lastUsedDay: 9))
+        var flushed = model
+        flushed.apply(pending)
+        XCTAssertEqual(flushed.words["Servus"], model.words["Servus"])
+        XCTAssertEqual(flushed.words["Servas"]?.count, 2)
+        XCTAssertTrue(flushed.knownWords().contains { $0.word == "Servas" }, "known immediately")
+
+        // Undoing the same autocorrection again and again never makes it a known word.
+        var fresh = UserModel()
+        for day in 0..<5 {
+            var d = UserModelDelta()
+            d.record(commit("Oder", typed: "oda", corrected: true), day: day)
+            d.record(.rejectedCorrection(typed: "oda", correction: "Oder"), day: day)
+            fresh.apply(d)
+        }
+        XCTAssertNil(fresh.words["Oder"])
+        XCTAssertTrue(fresh.bigrams.isEmpty && fresh.languageUsage.isEmpty)
+        XCTAssertEqual(fresh.words["oda"]?.count, 10)
+
+        // Picking the typed word while a correction is pending: the correction was never committed, so
+        // a word the user really uses keeps its count (it used to lose one every time and could drop out
+        // of the user lexicon).
+        var delta = UserModelDelta()
+        delta.record(commit("Servus"), day: 9)
+        delta.record(commit("Haus", typed: "Huas", corrected: true), day: 9)
+        delta.record(commit("da"), day: 9)
+        delta.record(.rejectedCorrection(typed: "Servas", correction: "Servus"), day: 9)
+        XCTAssertEqual(delta.words["Servus"]?.count, 1)
+        XCTAssertEqual(delta.words["Haus"]?.count, 1, "an earlier autocorrection is not taken back")
+        var kept = model
+        kept.apply(delta)
+        XCTAssertEqual(kept.words["Servus"]?.count, 4)
+        // Only the autocorrection the rejection names is taken back, and only once.
+        delta = UserModelDelta()
+        delta.record(commit("Haus", typed: "Huas", corrected: true), day: 9)
+        delta.record(.rejectedCorrection(typed: "Huas", correction: "Hand"), day: 9)
+        delta.record(.rejectedCorrection(typed: "Huas", correction: "Haus"), day: 9)
+        XCTAssertEqual(delta.words["Haus"]?.count, 1)
+        // The keyboard also applies every event on its own to its in-memory model: there a rejection
+        // cannot see the commit before it and takes nothing back (the file is right; reloading fixes it).
         var live = model
-        for event in events {
-            pending.record(event, day: 9)
+        for event in [commit("Servus", typed: "Servas", corrected: true), .rejectedCorrection(typed: "Servas", correction: "Servus")] {
             var single = UserModelDelta()
             single.record(event, day: 9)
             live.apply(single)
         }
-        XCTAssertNil(pending.words["Servus"], "commit and rejection cancel out")
-        XCTAssertEqual(pending.words["Servas"], LearnedWord(count: 2, lastUsedDay: 9))
-        var flushed = model
-        flushed.apply(pending)
-        XCTAssertEqual(flushed.words["Servus"]?.lastUsedDay, 1)
-        for m in [live, flushed] {
-            XCTAssertEqual(m.words["Servus"]?.count, 3)
-            XCTAssertEqual(m.words["Servas"]?.count, 2)
-            XCTAssertTrue(m.knownWords().contains { $0.word == "Servas" }, "known immediately")
-        }
+        XCTAssertEqual(live.words["Servus"]?.count, 4)
+        XCTAssertEqual(live.words["Servas"]?.count, 2)
 
-        // A correction that was never learned is not created; one learned once disappears.
-        var delta = UserModelDelta()
-        delta.record(.rejectedCorrection(typed: "oida", correction: "Oder"), day: 3)
-        XCTAssertEqual(delta.words["Oder"]?.count, -1)
-        var fresh = UserModel()
-        fresh.apply(delta)
-        XCTAssertNil(fresh.words["Oder"])
+        // Only casing differs: "Hallo" is taken back, "hallo" learned. Equality ignores what the delta
+        // remembers about the last autocorrection.
+        delta = UserModelDelta()
+        delta.record(commit("Hallo", typed: "hallo", corrected: true), day: 3)
+        delta.record(.rejectedCorrection(typed: "hallo", correction: "Hallo"), day: 3)
+        XCTAssertEqual(delta.words, ["hallo": LearnedWord(count: 2, lastUsedDay: 3)])
+        var rejectionOnly = UserModelDelta()
+        rejectionOnly.record(.rejectedCorrection(typed: "hallo", correction: "Hallo"), day: 3)
+        XCTAssertEqual(delta, rejectionOnly)
+        // An unlearnable typed word: only the correction is taken back.
+        delta = UserModelDelta()
+        delta.record(commit("ex", typed: "x", corrected: true), day: 3)
+        delta.record(.rejectedCorrection(typed: "x", correction: "ex"), day: 3)
+        XCTAssertTrue(delta.isEmpty)
+
+        // A negative word count in a delta lowers the stored count; manually added words stay.
+        var negative = UserModelDelta()
+        negative.words["Oder"] = LearnedWord(count: -1, lastUsedDay: 0)
         fresh.apply({ var d = UserModelDelta(); d.record(commit("Oder"), day: 3); return d }())
-        fresh.apply(delta)
+        fresh.apply(negative)
         XCTAssertNil(fresh.words["Oder"])
-        XCTAssertEqual(fresh.words["oida"]?.count, 4)
-        // Manually added words are never removed by a rejection.
+        fresh.apply(negative)
+        XCTAssertNil(fresh.words["Oder"], "never created by a negative count")
         fresh.addWord("Oder")
-        for _ in 0..<5 { fresh.apply(delta) }
+        for _ in 0..<5 { fresh.apply(negative) }
         XCTAssertEqual(fresh.words["Oder"]?.addedManually, true)
         XCTAssertEqual(fresh.words["Oder"]?.count, 0)
         XCTAssertTrue(fresh.knownWords().contains { $0.word == "Oder" })
+    }
 
-        // Only casing differs, or the typed word is unlearnable.
-        delta = UserModelDelta()
-        delta.record(.rejectedCorrection(typed: "hallo", correction: "Hallo"), day: 3)
-        XCTAssertEqual(delta.words, ["hallo": LearnedWord(count: 2, lastUsedDay: 3)])
-        delta = UserModelDelta()
-        delta.record(.rejectedCorrection(typed: "x", correction: "ex"), day: 3)
-        XCTAssertEqual(delta.words, ["ex": LearnedWord(count: -1, lastUsedDay: 0)])
+
+    /// The events of the real input controller, recorded like the keyboard does.
+    func testRejectionsFromTheInputControllerOnlyTakeBackCommittedCorrections() {
+        func run(_ actions: (InputController, (String) -> Void) -> Void) -> UserModelDelta {
+            let doc = MockDocument()
+            let sink = Sink()
+            var settings = KeibordSettings()
+            settings.enabledLanguages = [.enGB]
+            let controller = InputController(document: doc, engine: FakeEngine(), settings: settings, language: .enGB, clock: { 0 })
+            controller.learningSink = sink
+            controller.configure(field: FieldContext(autocapitalization: .none))
+            actions(controller) { text in
+                for ch in text {
+                    controller.handle(ch == " " ? .space : .character(String(ch), tap: nil, isLetter: ch.isLetter))
+                }
+            }
+            var delta = UserModelDelta()
+            for event in sink.events { delta.record(event, day: 7) }
+            return delta
+        }
+        var model = UserModel()
+        model.words["the"] = LearnedWord(count: 2, lastUsedDay: 1)
+
+        // "teh " is autocorrected to "the", then backspace restores "teh".
+        let undone = run { _, type in type("teh ") }
+        XCTAssertEqual(undone.words["the"]?.count, 1)
+        let undoneThenRejected = run { c, type in
+            type("teh ")
+            c.handle(.backspace)
+            type(" ")
+        }
+        XCTAssertNil(undoneThenRejected.words["the"], "the autocorrection is taken back")
+        XCTAssertEqual(undoneThenRejected.words["teh"]?.count, 3)
+
+        // The literal "teh" is picked while "the" is pending: "the" was never committed.
+        let picked = run { c, type in
+            type("teh")
+            c.handle(.suggestion(Suggestion(text: "teh", display: "“teh”", kind: .typed)))
+        }
+        XCTAssertEqual(picked.words, ["teh": LearnedWord(count: 3, lastUsedDay: 7, language: "en-GB")])
+        var after = model
+        after.apply(picked)
+        XCTAssertEqual(after.words["the"]?.count, 2, "a learned word keeps its count")
+        XCTAssertTrue(after.knownWords().contains { $0.word == "the" })
     }
 
     func testEmojiAndLanguageSwitchEvents() {
