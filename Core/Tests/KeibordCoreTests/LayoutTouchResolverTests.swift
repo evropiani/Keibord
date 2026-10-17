@@ -405,6 +405,13 @@ final class LayoutTouchResolverTests: XCTestCase {
             XCTAssertEqual(tap.candidates[0].cost, 0)
         }
         XCTAssertEqual(resolver.resolve(centre(frame(frames, "dotcom")))!.tap.primary, ".com")
+        // Character taps report where the key was touched, relative to its centre.
+        let seven = frame(frames, "7")
+        let off = resolver.resolve(CGPoint(x: seven.rect.midX - 5, y: seven.rect.midY + 8))!.tap
+        XCTAssertEqual(off.primary, "7")
+        XCTAssertEqual(off.touchModelKey, "qwertz11.letters.standard")
+        XCTAssertEqual(off.candidates[0].dx, -5 / Double(seven.rect.width), accuracy: 1e-9)
+        XCTAssertEqual(off.candidates[0].dy, 8 / Double(seven.rect.height), accuracy: 1e-9)
         for id in ["shift", "backspace", "numbers", "emoji", "return"] {
             let hit = resolver.resolve(centre(frame(frames, id)))!
             XCTAssertEqual(frames[hit.frameIndex].key.id, id)
