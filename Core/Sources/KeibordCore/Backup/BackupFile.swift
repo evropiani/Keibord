@@ -9,6 +9,8 @@ public enum BackupFile {
     /// Iteration counts accepted when decoding. Bounds a damaged or hostile file: the iOS cipher
     /// converts the count to `UInt32` (a negative value would crash) and huge counts would hang.
     public static let acceptedIterations: ClosedRange<Int> = 1...10_000_000
+    /// Smallest possible AES-GCM "combined" box: 12-byte nonce + 16-byte tag (empty plaintext).
+    static let minimumBoxSize = 28
 
     /// The envelope as written by `encode`.
     private struct Envelope: Encodable {
@@ -86,10 +88,12 @@ public enum BackupFile {
     /// * `notAKeibordBackup`: not JSON or not a Keibord export (format marker missing)
     /// * `unsupportedVersion`: written by a newer Keibord
     /// * `passwordRequired` / `wrongPassword`: encrypted and no or the wrong password
-    /// * `corrupted`: a Keibord export whose content is damaged
+    /// * `corrupted`: a Keibord export whose content is damaged or cut short
     public static func decode(_ data: Data, password: String?, cipher: BackupCipher?) throws -> BackupPayload {
         let decoder = KeibordJSON.decoder()
-        guard let env = try? decoder.decode(ParsedEnvelope.self, from: data), env.isKeibordBackup else {
+        let parsed = try? decoder.decode(ParsedEnvelope.self, from: data)
+        guard let env = parsed, env.isKeibordBackup else {
+            if parsed == nil, looksLikeCutShortExport(data) { throw BackupError.corrupted("Incomplete file") }
             throw BackupError.notAKeibordBackup
         }
         if let v = env.version, env.isNewer { throw BackupError.unsupportedVersion(v) }
@@ -106,6 +110,8 @@ public enum BackupFile {
             throw BackupError.corrupted("Unsupported encryption")
         }
         guard acceptedIterations ~= kdf.iterations else { throw BackupError.corrupted("Invalid iteration count") }
+        // Shorter than nonce + tag: no password can open it, so do not report a wrong password.
+        guard box.count >= minimumBoxSize else { throw BackupError.corrupted("Truncated encrypted data") }
         let key = try cipher.deriveKey(password: password, salt: salt, iterations: kdf.iterations)
         let plain: Data
         do {
@@ -118,6 +124,18 @@ public enum BackupFile {
         } catch {
             throw BackupError.corrupted("Unreadable payload")
         }
+    }
+
+    /// Whether data that is no valid JSON is a Keibord export cut short (an incomplete download or
+    /// copy), so it is reported as damaged instead of as a foreign file: it contains the format marker,
+    /// or it starts with the "box" key that opens an encrypted export (keys are sorted, so the marker
+    /// only follows the encrypted data).
+    static func looksLikeCutShortExport(_ data: Data) -> Bool {
+        if data.range(of: Data("\"\(format)\"".utf8)) != nil { return true }
+        func isSpace(_ b: UInt8) -> Bool { b == 0x20 || b == 0x0A || b == 0x0D || b == 0x09 }
+        let head = data.prefix(64).drop(while: isSpace)
+        guard head.first == UInt8(ascii: "{") else { return false }
+        return head.dropFirst().drop(while: isSpace).starts(with: Array("\"box\"".utf8))
     }
 
     /// Combines an imported payload with the current data.

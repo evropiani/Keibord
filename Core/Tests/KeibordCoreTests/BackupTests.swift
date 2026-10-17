@@ -4,6 +4,7 @@ import XCTest
 /// XOR "cipher" with a one-byte tag so a wrong key is detected (stands in for AES-GCM on iOS).
 private final class TestCipher: BackupCipher {
     private(set) var derivations: [Int] = []
+    var opened = 0
 
     func deriveKey(password: String, salt: Data, iterations: Int) throws -> Data {
         derivations.append(iterations)
@@ -16,6 +17,7 @@ private final class TestCipher: BackupCipher {
     }
 
     func open(_ combined: Data, key: Data) throws -> Data {
+        opened += 1
         let k = Array(key)
         guard combined.first == tag(k) else { throw BackupError.wrongPassword }
         return Data(combined.dropFirst().enumerated().map { $0.element ^ k[$0.offset % k.count] })
@@ -156,9 +158,14 @@ final class BackupTests: XCTestCase {
         let key = try cipher.deriveKey(password: "pw", salt: salt, iterations: 5)
         let garbage = try modified { o in
             o["kdf"] = ["name": "PBKDF2-SHA256", "iterations": 5, "salt": salt.base64EncodedString()]
-            o["box"] = try! cipher.seal(Data("not json".utf8), key: key).base64EncodedString()
+            o["box"] = try! cipher.seal(Data("not json, but long enough for a sealed box".utf8), key: key).base64EncodedString()
         }
+        cipher.opened = 0
         assertCorrupted(try BackupFile.decode(garbage, password: "pw", cipher: cipher))
+        XCTAssertEqual(cipher.opened, 1)
+        // Shorter than an AES-GCM nonce and tag: damaged whatever the password (not "wrong password").
+        let short = try modified { $0["box"] = Data(repeating: 7, count: 27).base64EncodedString() }
+        assertCorrupted(try BackupFile.decode(short, password: "geheim", cipher: TestCipher()))
         // "encrypted" missing: a box means the file is encrypted.
         let noFlag = try modified { $0["encrypted"] = nil }
         XCTAssertTrue(BackupFile.isEncrypted(noFlag))
@@ -190,6 +197,26 @@ final class BackupTests: XCTestCase {
         assertCorrupted(try BackupFile.decode(Data(#"{"format":"keibord-backup","version":1,"encrypted":false}"#.utf8), password: nil, cipher: nil))
         assertCorrupted(try BackupFile.decode(Data(#"{"format":"keibord-backup","version":1,"encrypted":false,"payload":[1]}"#.utf8), password: nil, cipher: nil))
         assertCorrupted(try BackupFile.decode(Data(#"{"format":"keibord-backup","version":1,"encrypted":false,"payload":{}}"#.utf8), password: nil, cipher: nil))
+    }
+
+    func testTruncatedBackupsAreReportedAsDamaged() throws {
+        // An incomplete download or copy: no valid JSON any more, but clearly a Keibord export.
+        let plain = try BackupFile.encode(samplePayload(), password: nil, cipher: nil)
+        let encrypted = try BackupFile.encode(samplePayload(), password: "geheim", cipher: TestCipher(), iterations: 10)
+        for data in [plain, encrypted] {
+            for fraction in [0.05, 0.25, 0.5, 0.9] {
+                let cut = data.prefix(Int(Double(data.count) * fraction))
+                XCTAssertFalse(BackupFile.isEncrypted(cut))
+                assertCorrupted(try BackupFile.decode(cut, password: nil, cipher: nil))
+                assertCorrupted(try BackupFile.decode(cut, password: "geheim", cipher: TestCipher()))
+            }
+            assertCorrupted(try BackupFile.decode(data.dropLast(), password: "geheim", cipher: TestCipher()))
+        }
+        XCTAssertTrue(String(decoding: encrypted.prefix(20), as: UTF8.self).contains("\"box\""), "an encrypted export starts with its box")
+        // Foreign JSON or text that merely mentions Keibord stays "not a backup".
+        for text in [#"{"note": "keibord-backup"}"#, "my keibord-backup notes", #"{"boxes": [1, 2"#, #"["box", 1"#, #"{"note": "#] {
+            assertError(.notAKeibordBackup, try BackupFile.decode(Data(text.utf8), password: nil, cipher: nil))
+        }
     }
 
     func testOlderAndPartialPayloadsDecodeTolerantly() throws {
