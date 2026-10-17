@@ -944,6 +944,23 @@ final class InputControllerTests: XCTestCase {
         XCTAssertEqual(doc.text, "hallo ")
     }
 
+    func testSelectionIsReplacedWithoutCorruptingTheWordBeforeIt() {
+        c.configure(field: noAutoCap)
+        setDocument("hallo teh", after: "xyz!")
+        doc.selectionLength = 3
+        type(" ")
+        XCTAssertEqual(doc.text, "hallo teh !", "no autocorrection while text is selected")
+        setDocument("hallo tes", after: "xyz!")
+        doc.selectionLength = 3
+        c.refreshSuggestions()
+        c.handle(.suggestion(Suggestion(text: "test", kind: .completion)))
+        XCTAssertEqual(doc.text, "hallo test!")
+        setDocument("hallo ", after: "Haus")
+        doc.selectionLength = 4
+        c.handle(.suggestion(Suggestion(text: "Auto", kind: .prediction)))
+        XCTAssertEqual(doc.text, "hallo Auto ")
+    }
+
     func testWordModeBackspace() {
         let cases: [(String, String)] = [
             ("Hallo Welt", "Hallo "),

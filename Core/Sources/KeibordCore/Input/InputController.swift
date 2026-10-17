@@ -246,6 +246,8 @@ public final class InputController {
         return !engine.isKnownWord(word, languages: langs) && engine.isKnownWord(String(word[..<i]), languages: langs)
     }
 
+    private var hasSelection: Bool { !(document.selectedText ?? "").isEmpty }
+
     private var cursorIsInsideWord: Bool {
         guard let next = document.documentContextAfterInput?.first else { return false }
         return TextUnits.isWordCharacter(next)
@@ -253,7 +255,8 @@ public final class InputController {
 
     private func autocorrectPermitted(_ word: String, before: String) -> Bool {
         guard settings.autocorrect, field.autocorrectAllowed, suppressAutocorrectFor != word else { return false }
-        if cursorIsInsideWord || isEmbedded(before: before) || trailingQuoteStem(word) != nil { return false }
+        // With a selection, deleteBackward would remove the selection instead of the word.
+        if hasSelection || cursorIsInsideWord || isEmbedded(before: before) || trailingQuoteStem(word) != nil { return false }
         return !isContraction(word)
     }
 
@@ -629,6 +632,7 @@ public final class InputController {
         case .correction, .completion, .shortcut, .autofill:
             // Shortcut phrases and autofill values are inserted exactly as the user stored them.
             let text = s.kind == .correction || s.kind == .completion ? styled(s.text) : s.text
+            if hasSelection { document.deleteBackward() }
             deleteCharacters(word.count)
             insert(text)
             if addSpace { insert(" ") }
