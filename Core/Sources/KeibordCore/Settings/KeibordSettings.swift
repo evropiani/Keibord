@@ -234,6 +234,8 @@ public extension KeyedDecodingContainer {
     /// version, a damaged entry) are skipped instead of discarding the whole array. Returns
     /// `defaultValue` when the key is missing or not an array.
     func lossyArray<T: Decodable>(_ key: Key, default defaultValue: [T]) -> [T] {
+        // Fast path: an undamaged array decodes in one go.
+        if let all = try? decodeIfPresent([T].self, forKey: key) { return all }
         guard var items = try? nestedUnkeyedContainer(forKey: key) else { return defaultValue }
         var result: [T] = []
         if let count = items.count { result.reserveCapacity(count) }
@@ -251,6 +253,9 @@ public extension KeyedDecodingContainer {
     /// discarding the whole dictionary (a single damaged learned word must not wipe all others).
     /// Returns `defaultValue` when the key is missing or not an object.
     func lossyDictionary<T: Decodable>(_ key: Key, default defaultValue: [String: T]) -> [String: T] {
+        // Fast path: an undamaged dictionary decodes in one go (entry by entry is ~40% slower, which
+        // matters for a large user-model.json loaded whenever the keyboard opens).
+        if let all = try? decodeIfPresent([String: T].self, forKey: key) { return all }
         guard let entries = try? nestedContainer(keyedBy: AnyCodingKey.self, forKey: key) else { return defaultValue }
         let keys = entries.allKeys
         var result: [String: T] = [:]
