@@ -137,6 +137,27 @@ final class EmojiTests: XCTestCase {
         let grid = Set(c.categories.flatMap(\.emojis))
         let withTone = grid.filter { $0.unicodeScalars.contains { tones.contains($0.value) } }
         XCTAssertTrue(withTone.isEmpty, "skin-tone variants are only offered as variants")
+
+        // Modifier bases written with U+FE0F in the grid had no variants at all (emoji.json keys them
+        // without U+FE0F): ✌️ ☝️ 🖐️ ✍️ 🕵️ 🕴️ 🏌️ ⛹️ 🏋️ and their ♂/♀ forms.
+        func scalars(_ s: String) -> [UInt32] { s.unicodeScalars.map(\.value) }
+        XCTAssertEqual(c.variants(of: "✌️").map(scalars), tones.map { [0x270C, $0] })
+        XCTAssertEqual(c.variants(of: "🖐️").first.map(scalars), [0x1F590, 0x1F3FB])
+        XCTAssertEqual(c.variants(of: "🕵️‍♀️").last.map(scalars), [0x1F575, 0x1F3FF, 0x200D, 0x2640, 0xFE0F])
+        XCTAssertEqual(c.variants(of: "❤️"), [], "U+FE0F alone does not make a modifier base")
+        XCTAssertEqual(c.variants(of: "☺️"), [])
+        let presentationBases = grid.filter { e in
+            let s = Array(e.unicodeScalars)
+            return s.count >= 2 && s[1] == "\u{FE0F}" && s[0].properties.isEmojiModifierBase
+        }
+        XCTAssertEqual(presentationBases.count, 17)
+        for e in presentationBases { XCTAssertEqual(c.variants(of: e).count, 5, e) }
+        // Every modifier base in the grid offers variants, except families (no toned forms exist).
+        let families: Set<UInt32> = [0x1F466, 0x1F467, 0x1F9D2, 0x1F46A]
+        for e in grid where e.unicodeScalars.contains(where: { $0.properties.isEmojiModifierBase })
+            && !e.unicodeScalars.contains(where: { families.contains($0.value) }) {
+            XCTAssertFalse(c.variants(of: e).isEmpty, e)
+        }
     }
 
     func testMissingAndDamagedKeywordFiles() throws {

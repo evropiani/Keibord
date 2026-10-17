@@ -71,16 +71,35 @@ public final class EmojiCatalog {
         let data = try Data(contentsOf: baseURL.appendingPathComponent("emoji.json"))
         let file = try JSONDecoder().decode(FileFormat.self, from: data)
         categories = file.categories.map { EmojiCategory(id: $0.id, emojis: $0.emojis) }
-        variantMap = file.variants ?? [:]
+        var variants = file.variants ?? [:]
         var position: [String: Int] = [:]
         for emoji in categories.lazy.flatMap(\.emojis) where position[emoji] == nil {
             position[emoji] = position.count
+            if variants[emoji] == nil, let tones = EmojiCatalog.skinToneVariants(ofPresentationForm: emoji) {
+                variants[emoji] = tones
+            }
         }
+        variantMap = variants
         self.position = position
     }
 
     /// Skin-tone variants of an emoji (empty when it has none).
     public func variants(of emoji: String) -> [String] { variantMap[emoji] ?? [] }
+
+    /// Variants of a modifier base written with U+FE0F after it ("✌️", "🖐️", "🕵️‍♀️", "🏋️"): the
+    /// toned forms replace the U+FE0F with the modifier ("✌🏻", "🕵🏻‍♀️"). emoji.json lacks them because
+    /// its generator keys variants by the base without U+FE0F, which is not the form in the grid.
+    static func skinToneVariants(ofPresentationForm emoji: String) -> [String]? {
+        let scalars = Array(emoji.unicodeScalars)
+        guard scalars.count >= 2, scalars[1] == "\u{FE0F}", scalars[0].properties.isEmojiModifierBase else { return nil }
+        return (UInt32(0x1F3FB)...0x1F3FF).compactMap(Unicode.Scalar.init).map { tone in
+            var toned = String.UnicodeScalarView()
+            toned.append(scalars[0])
+            toned.append(tone)
+            toned.append(contentsOf: scalars.dropFirst(2))
+            return String(toned)
+        }
+    }
 
     private func keywordIndex(_ code: String) -> KeywordIndex {
         lock.lock()
