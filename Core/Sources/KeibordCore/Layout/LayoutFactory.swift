@@ -103,7 +103,8 @@ public enum LayoutFactory {
 
     private static func symbols(_ r: LayoutRequest) -> KeyboardLayout {
         let lang = r.language
-        let currencies = ["€", "£", "$", "¥"].filter { $0 != lang.currencySymbol }.prefix(3)
+        // Apple's order: $ £ ¥ on euro layouts, € $ ¥ on UK, € £ ¥ on US.
+        let currencies = ["€", "$", "£", "¥"].filter { $0 != lang.currencySymbol }.prefix(3)
         let row0 = ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="].map { charKey($0, lang) }
         let row1 = (["_", "\\", "|", "~", "<", ">"] + currencies + ["•"]).map { charKey($0, lang) }
         var rows = [

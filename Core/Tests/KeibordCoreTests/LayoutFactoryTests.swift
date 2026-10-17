@@ -259,6 +259,7 @@ final class LayoutFactoryTests: XCTestCase {
             XCTAssertEqual(Array(row1.prefix(6)), ["_", "\\", "|", "~", "<", ">"])
             XCTAssertEqual(row1.last, "•")
             let currencies = Array(row1[6..<9])
+            XCTAssertEqual(currencies, ["€": ["$", "£", "¥"], "£": ["€", "$", "¥"], "$": ["€", "£", "¥"]][currency], language.rawValue)
             XCTAssertFalse(currencies.contains(currency), "\(language): symbols page repeats the main currency")
             XCTAssertEqual(Set(currencies).count, 3)
             XCTAssertTrue(Set(currencies).isSubset(of: ["€", "£", "$", "¥"]))
