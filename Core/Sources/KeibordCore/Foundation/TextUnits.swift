@@ -12,9 +12,14 @@ public enum TextUnits {
     public static let spaceSwallowingPunctuation: Set<Character> = [".", ",", "!", "?", ":", ";", ")", "…"]
 
     /// A letter (any script), combining mark or digit. Apostrophes are handled separately.
+    /// Emoji built on a digit or letter (keycaps "1️⃣", "#️⃣") are symbols, not word characters.
     public static func isWordCharacter(_ c: Character) -> Bool {
         if apostrophes.contains(c) { return false }
-        return c.isLetter || c.isNumber || c.unicodeScalars.allSatisfy { $0.properties.generalCategory == .nonspacingMark }
+        let scalars = c.unicodeScalars
+        if scalars.count > 1, scalars.contains(where: { $0.value == 0xFE0F || $0.value == 0x20E3 || $0.value == 0x200D }) {
+            return false
+        }
+        return c.isLetter || c.isNumber || scalars.allSatisfy { $0.properties.generalCategory == .nonspacingMark }
     }
 
     /// Normalises a word for dictionary lookups: NFC, lower-case, typographic apostrophe → "'".
