@@ -415,6 +415,15 @@ final class InputControllerTests: XCTestCase {
         XCTAssertEqual(doc.text, "teh ")
     }
 
+    func testNoAutocorrectOrLearningInsideURLsAddressesAndHashtags() {
+        c.configure(field: noAutoCap)
+        engine.corrections["gogle"] = "google"
+        engine.corrections["gmial"] = "gmail"
+        type("see www.gogle.com and teh@gmial.com #teh /teh ")
+        XCTAssertEqual(doc.text, "see www.gogle.com and teh@gmial.com #teh /teh ")
+        XCTAssertEqual(sink.commits.map(\.final), ["see", "www", "and"], "fragments of addresses are not learned")
+    }
+
     func testNoAutocorrectWhenTheCursorIsInsideAWord() {
         c.configure(field: noAutoCap)
         setDocument("teh", after: "x")
@@ -601,6 +610,29 @@ final class InputControllerTests: XCTestCase {
         type("mfg")
         c.handle(.suggestion(Suggestion(text: "Mit freundlichen Grüßen", kind: .shortcut)))
         XCTAssertEqual(doc.text, "Mit freundlichen Grüßen ")
+        XCTAssertTrue(sink.commits.isEmpty, "a phrase is not learned as a word")
+    }
+
+    func testShortcutExpansionOnSpaceIsVerbatimUndoableAndNotLearned() {
+        final class ShortcutEngine: SuggestionProviding {
+            func suggest(_ q: SuggestionQuery) -> SuggestionResult {
+                guard TextUnits.lookupKey(q.currentWord) == "omw" else { return .empty }
+                let s = Suggestion(text: "I'm on my way!", kind: .shortcut, isAutocorrect: true)
+                return SuggestionResult(suggestions: [s], autocorrection: s)
+            }
+            func noteCommitted(word: String, language: KeyboardLanguage?) {}
+            func isKnownWord(_ word: String, languages: [KeyboardLanguage]) -> Bool { false }
+            func likelyLanguage(of word: String, among languages: [KeyboardLanguage]) -> KeyboardLanguage? { nil }
+        }
+        let shortcuts = ShortcutEngine()
+        c = InputController(document: doc, engine: shortcuts, settings: settings([.enGB]), clock: { [unowned self] in self.now })
+        c.learningSink = sink
+        c.configure(field: noAutoCap)
+        type("omw ")
+        XCTAssertEqual(doc.text, "I'm on my way! ", "the stored phrase is inserted verbatim")
+        XCTAssertTrue(sink.commits.isEmpty)
+        c.handle(.backspace)
+        XCTAssertEqual(doc.text, "omw")
     }
 
     func testSuggestionDoesNotDoubleTheSpaceBeforeFollowingText() {

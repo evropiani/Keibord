@@ -129,7 +129,7 @@ public final class InputController {
         let result = engine.suggest(makeQuery(word: c.word, taps: composingTaps(c), before: before))
         var list = result.suggestions
         var correction = result.autocorrection
-        if correction != nil, !autocorrectPermitted(c.word) {
+        if correction != nil, !autocorrectPermitted(c.word, before: before) {
             correction = nil
             list = list.map { s in
                 var s = s
@@ -251,10 +251,17 @@ public final class InputController {
         return TextUnits.isWordCharacter(next)
     }
 
-    private func autocorrectPermitted(_ word: String) -> Bool {
+    private func autocorrectPermitted(_ word: String, before: String) -> Bool {
         guard settings.autocorrect, field.autocorrectAllowed, suppressAutocorrectFor != word else { return false }
-        if cursorIsInsideWord || trailingQuoteStem(word) != nil { return false }
+        if cursorIsInsideWord || isEmbedded(before: before) || trailingQuoteStem(word) != nil { return false }
         return !isContraction(word)
+    }
+
+    /// A word glued to a URL, e-mail address, path, hashtag or mention ("www.|gogle", "max@|gmx",
+    /// "#|urlaub") is neither autocorrected nor learned.
+    private func isEmbedded(before: String) -> Bool {
+        guard let previous = before.last else { return false }
+        return "@./\\_#".contains(previous)
     }
 
     /// Up to two words of the current sentence before `before`'s end, elided articles split off.
@@ -486,18 +493,27 @@ public final class InputController {
         let coreTaps = wordTaps.count == word.count ? Array(wordTaps.prefix(core.count)) : []
         var final = core
         var corrected = false
-        if autocorrect, suppressAutocorrectFor != word, autocorrectPermitted(core) {
+        var expandedShortcut = false
+        if autocorrect, suppressAutocorrectFor != word, autocorrectPermitted(core, before: before) {
             let result = engine.suggest(makeQuery(word: core, taps: coreTaps, before: before))
-            if let ac = result.autocorrection, !ac.text.isEmpty, styled(ac.text) != core {
-                final = styled(ac.text)
-                deleteCharacters(word.count)
-                insert(final + tail)
-                corrected = true
+            if let ac = result.autocorrection, !ac.text.isEmpty {
+                // Shortcut phrases are inserted exactly as the user stored them.
+                expandedShortcut = ac.kind == .shortcut
+                let replacement = expandedShortcut ? ac.text : styled(ac.text)
+                if replacement != core {
+                    final = replacement
+                    deleteCharacters(word.count)
+                    insert(final + tail)
+                    corrected = true
+                }
             }
         }
         insert(separator)
         undo = corrected ? UndoInfo(original: word, correction: final + tail, separator: separator, taps: tokenTaps, typedWord: core, correctedWord: final) : nil
-        recordCommit(final: final, typed: core, previous: previous, taps: coreTaps, corrected: corrected)
+        // An expanded shortcut is a phrase, not a word to learn; neither are pieces of URLs and addresses.
+        if !(corrected && expandedShortcut), !isEmbedded(before: before) {
+            recordCommit(final: final, typed: core, previous: previous, taps: coreTaps, corrected: corrected)
+        }
         taps = []
         suppressAutocorrectFor = nil
     }
@@ -616,7 +632,7 @@ public final class InputController {
             deleteCharacters(word.count)
             insert(text)
             if addSpace { insert(" ") }
-            if s.kind != .autofill {
+            if s.kind != .autofill, s.kind != .shortcut {
                 recordCommit(final: text, typed: word, previous: previous, taps: s.kind == .completion ? [] : wordTaps, corrected: false)
             }
         }
