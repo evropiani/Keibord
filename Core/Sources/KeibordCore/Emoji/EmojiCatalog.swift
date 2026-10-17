@@ -42,14 +42,28 @@ public final class EmojiCatalog {
         var variants: [String: [String]]?
     }
 
-    /// Normalised keywords of one language, in grid order.
+    /// Normalised keywords of one language, in grid order, packed into one byte buffer (an array per
+    /// keyword costs ~1 MB per language in the keyboard extension; this layout ~0.15 MB).
     private struct KeywordIndex {
-        struct Entry {
-            var emoji: String
-            /// `EmojiCatalog.normalize`d keywords; the first is the CLDR name.
-            var keywords: [[UInt8]]
+        /// Emoji with keywords, in grid order.
+        var emojis: [String] = []
+        /// Emoji `i` owns keywords `firstKeyword[i] ..< firstKeyword[i + 1]`; its first is the CLDR name.
+        var firstKeyword: [Int32] = [0]
+        /// Keyword `k` is `bytes[keywordStart[k] ..< keywordStart[k + 1]]` (`EmojiCatalog.normalize`d).
+        var keywordStart: [Int32] = [0]
+        var bytes: [UInt8] = []
+
+        mutating func append(_ emoji: String, keywords: [[UInt8]]) {
+            emojis.append(emoji)
+            for keyword in keywords {
+                bytes.append(contentsOf: keyword)
+                keywordStart.append(Int32(bytes.count))
+            }
+            firstKeyword.append(Int32(keywordStart.count - 1))
         }
-        var entries: [Entry]
+
+        /// Bytes used by the packed tables (without the emoji strings).
+        var tableBytes: Int { bytes.count + (firstKeyword.count + keywordStart.count) * 4 }
     }
 
     public init(baseURL: URL) throws {
@@ -74,15 +88,24 @@ public final class EmojiCatalog {
         if let index = indexes[code] { return index }
         let url = baseURL.appendingPathComponent("keywords-\(code).json")
         let table = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([String: [String]].self, from: $0) } ?? [:]
-        let entries = table.map { emoji, words in
-            KeywordIndex.Entry(emoji: emoji, keywords: words.map(EmojiCatalog.normalize).filter { !$0.isEmpty })
-        }.sorted { a, b in
-            let pa = position[a.emoji] ?? .max, pb = position[b.emoji] ?? .max
-            return pa != pb ? pa < pb : a.emoji < b.emoji
+        let ordered = table.keys.sorted { a, b in
+            let pa = position[a] ?? .max, pb = position[b] ?? .max
+            return pa != pb ? pa < pb : a < b
         }
-        let index = KeywordIndex(entries: entries)
+        var index = KeywordIndex()
+        for emoji in ordered {
+            let keywords = (table[emoji] ?? []).map(EmojiCatalog.normalize).filter { !$0.isEmpty }
+            if !keywords.isEmpty { index.append(emoji, keywords: keywords) }
+        }
         indexes[code] = index
         return index
+    }
+
+    /// Size of the packed keyword tables of the languages searched so far, in bytes.
+    var keywordIndexBytes: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return indexes.values.reduce(0) { $0 + $1.tableBytes }
     }
 
     /// Emoji whose keywords match `query` in any of the languages (accent- and case-insensitive; every
@@ -92,16 +115,38 @@ public final class EmojiCatalog {
     /// words starting with the query words > query words spread over several keywords; the CLDR name
     /// counts a little more than other keywords (a little more again when it starts with the query)
     /// and widely used emoji get a small boost. Ties keep the grid order, so results are stable.
+    ///
+    /// When nothing matches, the last one or two letters of the final word are dropped (at least four
+    /// stay) so inflected forms still find their keyword: "kosova" → "kosov(ë)", "shqipëria" →
+    /// "shqipëri", "smiles" → "smile".
     public func search(_ query: String, languageCodes: [String], limit: Int = 40) -> [String] {
-        let q = EmojiCatalog.normalize(query)
+        var q = EmojiCatalog.normalize(query)
         guard !q.isEmpty, limit > 0 else { return [] }
+        var codes: [String] = []
+        for code in languageCodes where !codes.contains(code) { codes.append(code) }
+        var results = matches(q, languageCodes: codes, limit: limit)
+        var dropped = 0
+        while results.isEmpty, dropped < 2, EmojiCatalog.lastWordLength(q) > 4 {
+            EmojiCatalog.dropLastCharacter(&q)
+            dropped += 1
+            results = matches(q, languageCodes: codes, limit: limit)
+        }
+        return results
+    }
+
+    private func matches(_ q: [UInt8], languageCodes: [String], limit: Int) -> [String] {
         let tokens = q.split(separator: EmojiCatalog.space).map(Array.init)
         var scores: [String: Int] = [:]
-        var seen = Set<String>()
-        for code in languageCodes where seen.insert(code).inserted {
-            for entry in keywordIndex(code).entries {
-                let score = EmojiCatalog.score(entry.keywords, query: q, tokens: tokens)
-                if score > scores[entry.emoji] ?? 0 { scores[entry.emoji] = score }
+        for code in languageCodes {
+            let index = keywordIndex(code)
+            index.bytes.withUnsafeBufferPointer { bytes in
+                index.keywordStart.withUnsafeBufferPointer { starts in
+                    for (i, emoji) in index.emojis.enumerated() {
+                        let keywords = Int(index.firstKeyword[i])..<Int(index.firstKeyword[i + 1])
+                        let score = EmojiCatalog.score(bytes, starts, keywords, query: q, tokens: tokens)
+                        if score > scores[emoji] ?? 0 { scores[emoji] = score }
+                    }
+                }
             }
         }
         let ranked = scores.map { (emoji: $0.key, score: $0.value + EmojiCatalog.popularityBonus($0.key), rank: EmojiCatalog.popularityRank[$0.key] ?? .max) }
@@ -160,34 +205,51 @@ public final class EmojiCatalog {
         return out
     }
 
-    /// Best match of the query against one emoji's keywords (0 = no match).
-    private static func score(_ keywords: [[UInt8]], query: [UInt8], tokens: [[UInt8]]) -> Int {
+    private typealias Bytes = UnsafeBufferPointer<UInt8>
+
+    /// Best match of the query against one emoji's keywords (`keywords` indexes `starts`; 0 = no match).
+    private static func score(_ bytes: Bytes, _ starts: UnsafeBufferPointer<Int32>, _ keywords: Range<Int>, query: [UInt8], tokens: [[UInt8]]) -> Int {
+        guard !keywords.isEmpty else { return 0 }
+        func keyword(_ k: Int) -> Bytes { Bytes(rebasing: bytes[Int(starts[k])..<Int(starts[k + 1])]) }
         var best = 0
         // A name that starts with the query ("cat face" for "cat") breaks ties between equal matches.
-        let namePrefix = keywords.first.map { $0.count > query.count && $0.starts(with: query) } ?? false
-        for (i, keyword) in keywords.enumerated() {
-            let name = i == 0 ? 4 : 0
-            if keyword == query { return 80 + name + (namePrefix ? 1 : 0) }
+        let name = keyword(keywords.lowerBound)
+        let namePrefix = name.count > query.count && name.starts(with: query)
+        for k in keywords {
+            let text = keyword(k)
+            let nameBonus = k == keywords.lowerBound ? 4 : 0
+            if text.count == query.count, text.elementsEqual(query) { return 80 + nameBonus + (namePrefix ? 1 : 0) }
             var whole = true, prefixes = true
             for token in tokens {
-                let m = wordMatch(keyword, token)
+                let m = wordMatch(text, token)
                 whole = whole && m.whole
                 prefixes = prefixes && m.prefix
                 if !prefixes { break }
             }
-            if whole { best = max(best, 60 + name) }
-            else if keyword.starts(with: query) { best = max(best, 40 + name) }
-            else if prefixes { best = max(best, 20 + name) }
+            if whole { best = max(best, 60 + nameBonus) }
+            else if text.starts(with: query) { best = max(best, 40 + nameBonus) }
+            else if prefixes { best = max(best, 20 + nameBonus) }
         }
         if best == 0, tokens.count > 1,
-           tokens.allSatisfy({ token in keywords.contains { wordMatch($0, token).prefix } }) {
+           tokens.allSatisfy({ token in keywords.contains { wordMatch(keyword($0), token).prefix } }) {
             best = 10
         }
         return best > 0 && namePrefix ? best + 1 : best
     }
 
+    /// Length in bytes of the last word of a normalised query.
+    private static func lastWordLength(_ q: [UInt8]) -> Int {
+        q.count - ((q.lastIndex(of: space) ?? -1) + 1)
+    }
+
+    /// Removes the last character (one UTF-8 sequence) of a normalised query.
+    private static func dropLastCharacter(_ q: inout [UInt8]) {
+        while let last = q.last, last & 0xC0 == 0x80 { q.removeLast() }
+        if !q.isEmpty { q.removeLast() }
+    }
+
     /// Whether `token` starts a word of `text` (`prefix`) or is a whole word of it (`whole`).
-    private static func wordMatch(_ text: [UInt8], _ token: [UInt8]) -> (prefix: Bool, whole: Bool) {
+    private static func wordMatch(_ text: Bytes, _ token: [UInt8]) -> (prefix: Bool, whole: Bool) {
         let n = text.count, m = token.count
         guard m > 0, m <= n else { return (false, false) }
         var prefix = false

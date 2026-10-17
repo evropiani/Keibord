@@ -64,6 +64,33 @@ final class EmojiTests: XCTestCase {
         XCTAssertTrue(try search("xyzzyq").isEmpty)
     }
 
+    func testInflectedFormsFallBackToTheirStem() throws {
+        // Definite/plural forms that are no keyword prefix: the last letters are dropped only when
+        // nothing matches.
+        XCTAssertEqual(try search("kosova", limit: 5), ["🇽🇰"])
+        XCTAssertEqual(try search("Kosova", ["sq"], limit: 5), ["🇽🇰"])
+        XCTAssertEqual(try search("shqipëria", limit: 5), ["🇦🇱"])
+        XCTAssertEqual(try search("flagge kosova", limit: 5), ["🇽🇰"])
+        XCTAssertTrue(try search("smiles", ["en"], limit: 10).contains("😊"))
+        XCTAssertEqual(try search("smiles", ["en"]), try search("smile", ["en"]))
+        // Queries with matches are never shortened; short words keep all their letters.
+        XCTAssertEqual(try search("katzen", limit: 5).first, "🐱")
+        XCTAssertTrue(try search("wien").isEmpty, "4 letters: no fallback to \"wie\"")
+        XCTAssertTrue(try search("xyzzyq").isEmpty, "at most two letters are dropped")
+        XCTAssertTrue(try search("Пётр").isEmpty)
+        XCTAssertTrue(try search("日本語の").isEmpty, "multi-byte characters are dropped whole")
+    }
+
+    func testKeywordIndexStaysSmall() throws {
+        let c = try EmojiCatalog(baseURL: Self.directory)
+        XCTAssertEqual(c.keywordIndexBytes, 0, "built on first search")
+        _ = c.search("herz", languageCodes: Self.all)
+        print("[emoji] packed keyword index: \(c.keywordIndexBytes / 1024) KiB for 4 languages")
+        // ~140 KB per language (the earlier one-array-per-keyword index took ~1 MB per language).
+        XCTAssertGreaterThan(c.keywordIndexBytes, 200_000)
+        XCTAssertLessThan(c.keywordIndexBytes, 1_000_000)
+    }
+
     func testRankingIsStableAndLimited() throws {
         let c = try catalog()
         let known = Set(c.categories.flatMap(\.emojis))
