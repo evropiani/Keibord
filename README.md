@@ -23,6 +23,8 @@ No network code anywhere: dictionaries, autocorrect and learning all run on your
 
 ## Install (no Mac needed)
 
+> **No computer, no weekly refresh:** with a paid Apple Developer account (€99/year), Keibord installs and auto-updates through TestFlight. See **[docs/INSTALL-NO-PC.md](docs/INSTALL-NO-PC.md)**. The steps below are for a free Apple ID.
+
 1. Download `Keibord.ipa` from the latest [GitHub release](../../releases).
 2. Install **Sideloadly** (Windows or macOS) and connect your iPhone by cable. Sign in with your free Apple ID and sideload the IPA.
 3. On the iPhone, trust the developer profile under **Settings → General → VPN & Device Management**. Then enable **Settings → Privacy & Security → Developer Mode** and restart.
