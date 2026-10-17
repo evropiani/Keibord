@@ -55,6 +55,21 @@ public enum BackupError: Error, Equatable {
     case corrupted(String)
 }
 
+extension BackupError: CustomStringConvertible, LocalizedError {
+    /// A message for the user (also used when the error is interpolated into a string).
+    public var description: String {
+        switch self {
+        case .notAKeibordBackup: return "This file is not a Keibord backup."
+        case .unsupportedVersion(let v): return "This backup was made by a newer version of Keibord (format \(v)). Update Keibord to import it."
+        case .passwordRequired: return "This backup is encrypted. Enter its password."
+        case .wrongPassword: return "Wrong password."
+        case .corrupted(let detail): return "The backup file is damaged (\(detail))."
+        }
+    }
+
+    public var errorDescription: String? { description }
+}
+
 /// How an imported backup is applied.
 public enum ImportMode: String, Codable, CaseIterable, Sendable {
     /// Combine learned data with what is on this device; imported settings replace current ones.

@@ -75,8 +75,10 @@ public enum BackupFile {
         return try encoder.encode(Envelope(format: format, version: version, encrypted: false, payload: payload, kdf: nil, cipher: nil, box: nil))
     }
 
+    /// Whether `decode` needs a password for this file. False for anything this version cannot read
+    /// (not a backup, or from a newer version) so no password is asked for before the error is shown.
     public static func isEncrypted(_ data: Data) -> Bool {
-        guard let env = try? KeibordJSON.decoder().decode(ParsedEnvelope.self, from: data), env.isKeibordBackup else { return false }
+        guard let env = try? KeibordJSON.decoder().decode(ParsedEnvelope.self, from: data), env.isKeibordBackup, !env.isNewer else { return false }
         return env.isEncrypted
     }
 

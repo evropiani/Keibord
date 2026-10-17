@@ -180,7 +180,11 @@ final class BackupTests: XCTestCase {
                      #"{"format":"keibord-backup","version":3,"encrypted":true,"kdf":{"name":"argon2id"},"box":"AAAA"}"#]
         for (i, text) in newer.enumerated() {
             assertError(.unsupportedVersion(i == 2 ? 3 : 2), try BackupFile.decode(Data(text.utf8), password: "pw", cipher: TestCipher()))
+            assertError(.unsupportedVersion(i == 2 ? 3 : 2), try BackupFile.decode(Data(text.utf8), password: nil, cipher: nil))
+            XCTAssertFalse(BackupFile.isEncrypted(Data(text.utf8)), "no password prompt for a file that cannot be read")
         }
+        XCTAssertEqual("\(BackupError.unsupportedVersion(2))", "This backup was made by a newer version of Keibord (format 2). Update Keibord to import it.")
+        XCTAssertEqual(BackupError.wrongPassword.localizedDescription, "Wrong password.")
 
         // A Keibord file whose payload is missing or unusable is corrupted, not "not a backup".
         assertCorrupted(try BackupFile.decode(Data(#"{"format":"keibord-backup","version":1,"encrypted":false}"#.utf8), password: nil, cipher: nil))
