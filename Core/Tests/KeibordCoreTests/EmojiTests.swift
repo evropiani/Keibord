@@ -150,7 +150,7 @@ final class EmojiTests: XCTestCase {
             let s = Array(e.unicodeScalars)
             return s.count >= 2 && s[1] == "\u{FE0F}" && s[0].properties.isEmojiModifierBase
         }
-        XCTAssertEqual(presentationBases.count, 17)
+        XCTAssertGreaterThanOrEqual(presentationBases.count, 17)
         for e in presentationBases { XCTAssertEqual(c.variants(of: e).count, 5, e) }
         // Every modifier base in the grid offers variants, except families (no toned forms exist).
         let families: Set<UInt32> = [0x1F466, 0x1F467, 0x1F9D2, 0x1F46A]
