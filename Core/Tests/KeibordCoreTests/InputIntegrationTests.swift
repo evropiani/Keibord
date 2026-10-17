@@ -125,14 +125,20 @@ final class InputIntegrationTests: XCTestCase {
                        file: StaticString = #filePath, line: UInt = #line) throws {
         try requireDictionaries()
         var passed = 0
+        var seconds = 0.0
+        var keys = 0
         for (typed, expected) in cases {
             let typist = Typist(settings(languages), language: languages[0])
+            let start = Date()
             typist.type(typed)
+            seconds += Date().timeIntervalSince(start)
+            keys += typed.count
             XCTAssertEqual(typist.missingKeys, [], "keys not found while typing \(typed)", file: file, line: line)
             XCTAssertEqual(typist.doc.text, expected, "typed \(typed.debugDescription) in \(languages.map(\.rawValue))", file: file, line: line)
             if typist.doc.text == expected { passed += 1 }
         }
-        print("InputIntegration \(languages.map(\.rawValue)): \(passed)/\(cases.count) sentences exact")
+        print("InputIntegration \(languages.map(\.rawValue)): \(passed)/\(cases.count) sentences exact,",
+              String(format: "%.2f ms per key", seconds * 1000 / Double(max(1, keys))))
     }
 
     func testGerman() throws {

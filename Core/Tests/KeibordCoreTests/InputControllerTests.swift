@@ -5,52 +5,54 @@ import XCTest
 /// graphemes (`Character`s), `deleteBackward` removes the selection when there is one, and
 /// `visibleLimit` emulates hosts that only expose the last few characters before the cursor.
 final class MockDocument: TextDocumentProxyLike {
-    var text = ""
-    var cursor = 0
+    /// Text before the cursor and after it (the selection is the first `selectionLength` characters of `after`).
+    private var before = ""
+    private var after = ""
     var selectionLength = 0
     var visibleLimit: Int?
     var contextUnavailable = false
     var deleteCount = 0
 
+    var text: String { before + after }
+    var cursor: Int {
+        get { before.count }
+        set {
+            let all = Array(text)
+            let i = min(max(0, newValue), all.count)
+            before = String(all[..<i])
+            after = String(all[i...])
+        }
+    }
+
     var documentContextBeforeInput: String? {
         if contextUnavailable { return nil }
-        let before = String(Array(text)[0..<cursor])
         if let limit = visibleLimit { return String(before.suffix(limit)) }
         return before
     }
-    var documentContextAfterInput: String? { String(Array(text)[(cursor + selectionLength)...]) }
-    var selectedText: String? {
-        selectionLength > 0 ? String(Array(text)[cursor..<(cursor + selectionLength)]) : nil
-    }
+    var documentContextAfterInput: String? { String(after.dropFirst(selectionLength)) }
+    var selectedText: String? { selectionLength > 0 ? String(after.prefix(selectionLength)) : nil }
     func insertText(_ t: String) {
-        let chars = Array(text)
-        let before = String(chars[0..<cursor]) + t
-        let after = String(chars[(cursor + selectionLength)...])
-        text = before + after
-        cursor = before.count
+        after = String(after.dropFirst(selectionLength))
         selectionLength = 0
+        before += t
     }
     func deleteBackward() {
         deleteCount += 1
-        var chars = Array(text)
         if selectionLength > 0 {
-            chars.removeSubrange(cursor..<(cursor + selectionLength))
+            after = String(after.dropFirst(selectionLength))
             selectionLength = 0
-        } else {
-            guard cursor > 0 else { return }
-            chars.remove(at: cursor - 1)
-            cursor -= 1
+        } else if !before.isEmpty {
+            before.removeLast()
         }
-        text = String(chars)
     }
     func adjustTextPosition(byCharacterOffset offset: Int) {
         selectionLength = 0
-        cursor = min(max(0, cursor + offset), text.count)
+        cursor += offset
     }
     /// Replaces the whole document (as the host app would) and puts the cursor after `before`.
     func set(_ before: String, after: String = "") {
-        text = before + after
-        cursor = before.count
+        self.before = before
+        self.after = after
         selectionLength = 0
     }
 }
@@ -606,6 +608,9 @@ final class InputControllerTests: XCTestCase {
         setDocument("ich bi", after: " heute")
         c.handle(.suggestion(Suggestion(text: "bin", kind: .correction)))
         XCTAssertEqual(doc.text, "ich bin heute")
+        XCTAssertEqual(doc.cursor, 8, "the cursor moves over the existing space")
+        type(".")
+        XCTAssertEqual(doc.text, "ich bin. heute", "the existing space acts as the automatic space")
         setDocument("ich bi", after: ".")
         c.handle(.suggestion(Suggestion(text: "bin", kind: .correction)))
         XCTAssertEqual(doc.text, "ich bin.")
@@ -1008,7 +1013,7 @@ final class InputControllerTests: XCTestCase {
         let start = Date()
         type(String(repeating: "noch ein satz mit worten. ", count: 8))
         let perKey = Date().timeIntervalSince(start) / Double(26 * 8)
-        XCTAssertLessThan(perKey, 0.01, "controller overhead per key press")
+        XCTAssertLessThan(perKey, 0.005, "controller overhead per key press")
     }
 
     // MARK: - Cursor movement and external changes

@@ -213,6 +213,7 @@ public final class InputController {
     /// Splits an unknown token at its last inner apostrophe when the part up to and including the
     /// apostrophe is a word of its own: "l'amico" → ("l'", "amico"), "c'è" → ("c'", "è").
     private func elisionSplit(_ token: String) -> (head: String, word: String)? {
+        guard field.kind.isProse else { return nil }
         let chars = Array(token)
         guard chars.count > 2,
               let i = chars.indices.last(where: { $0 > 0 && $0 + 1 < chars.count && TextUnits.apostrophes.contains(chars[$0]) })
@@ -232,7 +233,7 @@ public final class InputController {
     /// A closing quote typed right after a word ("hello’"): the word without it, unless the word is
     /// known with the apostrophe ("po'").
     private func trailingQuoteStem(_ word: String) -> String? {
-        guard word.count > 1, let last = word.last, TextUnits.apostrophes.contains(last) else { return nil }
+        guard field.kind.isProse, word.count > 1, let last = word.last, TextUnits.apostrophes.contains(last) else { return nil }
         return engine.isKnownWord(word, languages: languages) ? nil : String(word.dropLast())
     }
 
@@ -582,9 +583,18 @@ public final class InputController {
         let word = c.word
         let wordTaps = composingTaps(c)
         let previous = previousWords(before: String(ctx.dropLast(word.count))).last
-        // No extra space when the text after the cursor already starts with one (or with punctuation).
+        // No extra space when the text after the cursor already starts with one (the cursor moves over
+        // it instead) or with punctuation.
         let next = document.documentContextAfterInput?.first
+        let skipSpace = s.appendsSpace && next == " "
         let addSpace = s.appendsSpace && !(next.map { $0.isWhitespace || TextUnits.spaceSwallowingPunctuation.contains($0) } ?? false)
+        defer {
+            if skipSpace, s.kind != .card, s.kind != .action {
+                document.adjustTextPosition(byCharacterOffset: 1)
+                expectedContext = context
+                autoSpace = true
+            }
+        }
         switch s.kind {
         case .card, .action:
             return
