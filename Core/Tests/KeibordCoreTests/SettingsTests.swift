@@ -179,6 +179,39 @@ final class SettingsTests: XCTestCase {
         try roundTrip(m)
     }
 
+    func testHugeCountsAreClampedSoMergingCannotOverflow() throws {
+        // A damaged or hand-made backup with Int.max counts used to crash the app on a merge import
+        // (integer overflow when the counts were added up).
+        let max = "9223372036854775807"
+        let json = """
+        {"words": {"leiwand": {"count": \(max), "lastUsedDay": 1}, "Leiwand": {"count": \(max), "lastUsedDay": 2}},
+         "bigrams": {"voll\\u001fleiwand": \(max), "zero\\u001fpair": 0, "neg\\u001fpair": -3},
+         "touch": {"g|a": {"sumDX": 1e308, "sumDY": -1e308, "count": \(max)}, "g|b": {"sumDX": 50, "sumDY": -0.5, "count": 10}},
+         "emoji": {"😂": {"count": \(max), "lastUsed": 1}},
+         "languageUsage": {"de-AT": \(max), "it-IT": -5}}
+        """
+        let m = try decode(UserModel.self, json)
+        let limit = UserModel.maxCount
+        XCTAssertEqual(m.words["leiwand"]?.count, limit)
+        XCTAssertEqual(m.bigrams, ["voll\u{1F}leiwand": limit], "pairs that were never seen are dropped")
+        XCTAssertEqual(m.touch["g|a"], TouchStat(sumDX: Double(limit), sumDY: -Double(limit), count: limit))
+        XCTAssertEqual(m.touch["g|b"], TouchStat(sumDX: 10, sumDY: -0.5, count: 10), "each sample lies within ±1 key size")
+        XCTAssertEqual(m.emoji["😂"]?.count, limit)
+        XCTAssertEqual(m.languageUsage, ["de-AT": limit, "it-IT": 0])
+
+        var merged = m.merged(with: m)
+        merged.apply({ var d = UserModelDelta(); d.record(.committedWord(final: "leiwand", typed: "leiwand", previous: "voll", language: .deAT, taps: nil, wasAutocorrected: false)); return d }())
+        merged.prune()
+        XCTAssertEqual(merged.words["leiwand"]?.count, 2 * limit + 1)
+        XCTAssertEqual(merged.knownWords().first?.word, "leiwand")
+        XCTAssertEqual(merged.knownWords().first?.zipf, 6)
+        // Saved and loaded again, the counts are back within the limit (repeated merges cannot grow them).
+        let reloaded = try KeibordJSON.decoder().decode(UserModel.self, from: KeibordJSON.encoder().encode(merged))
+        XCTAssertEqual(reloaded.words["leiwand"]?.count, limit)
+        XCTAssertEqual(reloaded.touch["g|a"]?.count, limit)
+        XCTAssertTrue(reloaded.touch.values.allSatisfy { $0.sumDX.isFinite && $0.sumDY.isFinite })
+    }
+
     func testKeyboardRuntimeState() throws {
         let state = KeyboardRuntimeState(currentLanguage: .sqXK, lastActive: Date(timeIntervalSince1970: 1_760_000_000), hasFullAccess: true,
                                          keyboardVersion: "1.0.0 (1)", appGroupIdentifier: "group.com.keibord.app")

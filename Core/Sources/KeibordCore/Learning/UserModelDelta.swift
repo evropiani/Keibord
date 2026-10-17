@@ -166,9 +166,12 @@ public extension UserModel {
         if emoji.count > maxEmoji {
             emoji = Dictionary(uniqueKeysWithValues: emojiByRecency.prefix(max(0, maxEmoji)).map { ($0.key, $0.value) })
         }
-        // Cap touch statistics so old habits fade: halve when very large.
+        // Cap touch statistics so old habits fade: halve when very large (sums scaled like the count,
+        // so the mean offset stays the same for odd counts too).
         for (k, t) in touch where t.count > 400 {
-            touch[k] = TouchStat(sumDX: t.sumDX / 2, sumDY: t.sumDY / 2, count: t.count / 2)
+            let kept = t.count / 2
+            let scale = Double(kept) / Double(t.count)
+            touch[k] = TouchStat(sumDX: t.sumDX * scale, sumDY: t.sumDY * scale, count: kept)
         }
     }
 

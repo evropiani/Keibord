@@ -227,7 +227,9 @@ final class LearningTests: XCTestCase {
         XCTAssertEqual(model.bigrams, ["a\u{1F}b": 3, "c\u{1F}d": 2, "a\u{1F}c": 1])
         XCTAssertEqual(Set(model.emoji.keys), ["😂", "❤️"], "the most recently used emoji are kept")
         XCTAssertEqual(model.touch["g|a"]?.count, 200)
-        XCTAssertEqual(model.touch["g|a"]?.meanDX ?? 0, 80.2 / 401, accuracy: 0.001)
+        // Halving keeps the mean exactly (halving the sums of 401 samples but keeping 200 moved it).
+        XCTAssertEqual(model.touch["g|a"]?.meanDX ?? 0, 80.2 / 401, accuracy: 1e-12)
+        XCTAssertEqual(model.touch["g|a"]?.meanDY ?? 0, -40.4 / 401, accuracy: 1e-12)
         XCTAssertEqual(model.touch["g|b"], TouchStat(sumDX: 1, sumDY: 1, count: 400))
     }
 
