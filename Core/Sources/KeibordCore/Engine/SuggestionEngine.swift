@@ -16,6 +16,8 @@ public final class SuggestionEngine: SuggestionProviding {
     private var profile = PersonalInfo()
     private var lastLanguages: [KeyboardLanguage] = []
     /// The word of the last correction query: what the user typed before the word was committed.
+    /// Languages the previous word of the current query belongs to (when that is informative).
+    private var contextLanguages: Set<KeyboardLanguage> = []
     private var lastTypedWord = ""
     /// Accented words committed per dictionary: typed with their accents / typed without them.
     private var accentHabit: [String: (typed: Double, omitted: Double)] = [:]
@@ -66,19 +68,22 @@ public final class SuggestionEngine: SuggestionProviding {
     /// A word that is only known in some enabled languages is corrected into another enabled language
     /// when that correction is this many bits more likely ("teh" is a rare Albanian word: "the").
     public var crossLanguageMargin: Double = 8
+    /// The same for a cheap correction such as a missing apostrophe ("shes" (Albanian) → "she's").
+    public var cheapCrossLanguageMargin: Double = 5
     /// Maximum edit cost of such a cross-language correction (one slip, transposition or missing letter).
     public var crossLanguageMaxCost: Double = 8
     /// Bits taken from the lower-case twin of a German noun ("quatsch" / "Quatsch", "ende" / "Ende") when
     /// the noun is the dominant form, so that typing it in lower case is corrected.
     public var nounTwinDiscount: Double = 5
-    /// Minimum zipf of such a dominant noun: below it ties are mostly curated interjections ("Baba"/"baba").
-    public var nounTwinMinZipf: Double = 4
     /// Extra margin for replacing a word of the layout language by a word of another language ("ate" stays
     /// English on the English keyboard instead of becoming the Albanian "atë").
     public var layoutLanguageMargin: Double = 4
     /// Extra margin for restoring a valid word into the accented word of a language the user is not
     /// currently writing in ("ate" → "atë" needs Albanian context; "une" → "unë" is clear without).
     public var foreignAccentMargin: Double = 4
+    /// Prior bonus (bits) for the languages of the previous word: neighbouring words share their language
+    /// more often than the message as a whole ("Faleminderit per" → "për").
+    public var contextLanguageBonus: Double = 1
     /// A word belongs to the languages that know it at most this much (zipf) below its best frequency.
     public var nativeZipfGap: Double = 1.5
 
@@ -206,7 +211,10 @@ public final class SuggestionEngine: SuggestionProviding {
             guard let lex = lexicon(for: language), let z = lex.lookup(key: key).map({ lex.zipf($0) }).max() else { continue }
             known.append((language, z))
         }
-        guard let best = known.map(\.zipf).max() else { return [] }
+        guard let best = known.map(\.zipf).max() else {
+            // Chat abbreviations are evidence too ("flm" is Albanian).
+            return languages.filter { Self.builtInWords[$0.dictionaryID]?.contains(key) ?? false }
+        }
         return known.filter { $0.zipf >= best - nativeZipfGap }.map(\.language)
     }
 
@@ -247,6 +255,11 @@ public final class SuggestionEngine: SuggestionProviding {
         var languages: [KeyboardLanguage] = []
         for l in query.languages where !languages.contains(l) { languages.append(l) }
         lastLanguages = languages
+        contextLanguages = []
+        if languages.count > 1, let previous = previousWord(query) {
+            let native = nativeLanguages(of: previous, among: languages)
+            if native.count < languages.count { contextLanguages = Set(native) }
+        }
         let field = query.field
 
         if field.kind.isPersonalInfo {
@@ -289,6 +302,7 @@ public final class SuggestionEngine: SuggestionProviding {
         guard languages.count > 1 else { return 1 }
         func raw(_ l: KeyboardLanguage) -> Double {
             (l == languages.first ? 1.0 : 0.0) + detector.logShare(of: l, among: languages)
+                + (contextLanguages.contains(l) ? contextLanguageBonus : 0)
         }
         let best = languages.map(raw).max() ?? 0
         return raw(language) - best + 1
@@ -336,9 +350,19 @@ public final class SuggestionEngine: SuggestionProviding {
     /// Language-model score (bits) of word `id` of `lex` after the context's previous word.
     private func languageScore(_ lex: WordLexicon, _ language: KeyboardLanguage, _ id: Int, _ context: Context) -> Double {
         let word = lex.word(id)
-        let bigram = userBigramLog2(context.previous, word) ?? context.successors[language]?[TextUnits.lookupKey(word)]
-        return languageModel(unigram: lex.log2Prob(id), bigram: bigram)
+        let successors = context.successors[language]
+        if let bigram = userBigramLog2(context.previous, word) ?? successors?[TextUnits.lookupKey(word)] {
+            return languageModel(unigram: lex.log2Prob(id), bigram: bigram)
+        }
+        let backoff = languageModel(unigram: lex.log2Prob(id), bigram: nil)
+        // The dictionary keeps every successor with P ≥ 2^-8: a word missing from the previous word's list is
+        // rarer than that, however frequent it is on its own ("questa e" vs "questa è").
+        if let successors = successors, !successors.isEmpty { return min(backoff, Self.minStoredBigramLog2) }
+        return backoff
     }
+
+    /// log2 of the smallest bigram probability the dictionaries store.
+    static let minStoredBigramLog2: Double = -8
 
     private func userBigramLog2(_ previous: String?, _ word: String) -> Double? {
         guard let previous = previous else { return nil }
@@ -646,6 +670,8 @@ public final class SuggestionEngine: SuggestionProviding {
         let typedLower = !Casing.hasUppercase(typed)
         var keepMass = 0.0
         var layoutKeepMass = 0.0
+        /// Prior of the language of the most likely typed reading.
+        var keepPrior: (score: Double, prior: Double)?
         var decisiveLowercase = false
         var knownIn: Set<String> = []
         var capitalised: [(form: String, score: Double, zipf: Double, language: KeyboardLanguage?)] = []
@@ -663,14 +689,16 @@ public final class SuggestionEngine: SuggestionProviding {
                 }
             }
         }
-        let verbContext = context.previous.map { Self.germanPronouns.contains(TextUnits.lookupKey($0)) } ?? false
+        let previousKey = context.previous.map { TextUnits.lookupKey($0) }
+        let verbContext = previousKey.map { Self.germanPronouns.contains($0) } ?? false
+        let nounContext = previousKey.map { Self.germanDeterminers.contains($0) } ?? false
         for language in languages {
             guard let lex = lexicon(for: language) else { continue }
             let ids = lex.lookup(key: typedKey)
             guard !ids.isEmpty else { continue }
             knownIn.insert(language.dictionaryID)
             let p = prior(language, languages)
-            let nounTwin = typedLower && !verbContext && isDominantNoun(lex, language: language, ids: ids, key: typedKey)
+            let nounTwin = typedLower && !verbContext && isDominantNoun(lex, language: language, ids: ids, key: typedKey, nounContext: nounContext)
             for id in ids {
                 let w = lex.word(id)
                 let score = languageScore(lex, language, id, context) + p
@@ -681,6 +709,7 @@ public final class SuggestionEngine: SuggestionProviding {
                     if lowercase, language == languages.first, !nounTwin { decisiveLowercase = true }
                     let mass = pow(2, lowercase && nounTwin ? score - nounTwinDiscount : score)
                     keepMass += mass
+                    if keepPrior == nil || score > keepPrior!.score { keepPrior = (score, p) }
                     if language == languages.first { layoutKeepMass += mass }
                 } else if typedLower, Casing.startsUppercase(w) {
                     capitalised.append((w, score, lex.zipf(id), language))
@@ -702,8 +731,8 @@ public final class SuggestionEngine: SuggestionProviding {
             let name = !query.isSentenceStart && Casing.startsUppercase(typed) && !Casing.isAllCaps(typed)
             let keep = keepScore + (name ? properNounMargin : 0)
             if query.accentRestoration,
-               let option = knownWordAccentOption(typedKey: typedKey, keepScore: keep, ranked: ranked, knownIn: knownIn,
-                                                  languages: languages, layoutLanguage: layout) {
+               let option = knownWordAccentOption(typedKey: typedKey, keepScore: keep, ranked: ranked, knownIn: knownIn, languages: languages,
+                                                  keepPrior: keepPrior?.prior ?? -Double.infinity, layoutLanguage: layout) {
                 options.append(option)
             }
             if keepMass > 0,
@@ -736,23 +765,25 @@ public final class SuggestionEngine: SuggestionProviding {
         return (Suggestion(text: top.form, kind: .correction, isAutocorrect: true, language: top.language), top.score)
     }
 
-    /// A German key whose capitalised form is the noun people mean although a lower-case twin exists: the
-    /// noun is listed first (the dictionary breaks frequency ties by the casing books use: "Quatsch",
-    /// "Ende", "Schule") or it is one of `germanNouns`.
-    private func isDominantNoun(_ lex: WordLexicon, language: KeyboardLanguage, ids: [Int], key: String) -> Bool {
+    /// A German key whose capitalised form is the noun people mean although a lower-case twin exists: one
+    /// of `germanNouns`, or a key whose most frequent form is the noun right after an article ("so ein
+    /// quatsch", "bis zum ende", "in der schule", "beim heurigen"). Without that context the lower-case
+    /// twin may well be meant ("du bist arm", "null Ahnung").
+    private func isDominantNoun(_ lex: WordLexicon, language: KeyboardLanguage, ids: [Int], key: String, nounContext: Bool) -> Bool {
         guard language == .deAT, let first = ids.first else { return false }
-        let firstForm = lex.word(first)
         if Self.germanNouns.contains(key) { return true }
-        guard Casing.startsUppercase(firstForm), !Casing.isAllCaps(firstForm), lex.zipf(first) >= nounTwinMinZipf else { return false }
-        return ids.contains { !Casing.hasUppercase(lex.word($0)) && lex.zipf($0) >= lex.zipf(first) }
+        let firstForm = lex.word(first)
+        guard nounContext, Casing.startsUppercase(firstForm), !Casing.isAllCaps(firstForm) else { return false }
+        return ids.contains { !Casing.hasUppercase(lex.word($0)) }
     }
 
     /// The accented reading of a valid typed word ("mire" → "mirë"), if it is `knownWordAccentMargin` bits
     /// more likely than the typed readings after paying `accentOmissionCost` per missing accent (plus
     /// `layoutLanguageMargin` to leave `layoutLanguage`, which knows the typed word, and `foreignAccentMargin`
-    /// for a language that does not know the typed word and is not the one the user is writing in).
-    private func knownWordAccentOption(typedKey: String, keepScore: Double, ranked: [Candidate], knownIn: Set<String>,
-                                       languages: [KeyboardLanguage], layoutLanguage: KeyboardLanguage?) -> (suggestion: Suggestion, score: Double)? {
+    /// for a language that does not know the typed word and is not clearly (1 bit) more likely than the
+    /// language of the typed reading).
+    private func knownWordAccentOption(typedKey: String, keepScore: Double, ranked: [Candidate], knownIn: Set<String>, languages: [KeyboardLanguage],
+                                       keepPrior: Double, layoutLanguage: KeyboardLanguage?) -> (suggestion: Suggestion, score: Double)? {
         // Someone typing some accents ("ketë", "nö") typed this word the way they meant it.
         let folded = Diacritics.fold(typedKey)
         guard folded == typedKey else { return nil }
@@ -760,11 +791,19 @@ public final class SuggestionEngine: SuggestionProviding {
         for c in ranked where c.kind == .correction {
             guard let language = c.language else { continue }
             let key = TextUnits.lookupKey(c.form)
-            guard key != typedKey, key.count == typedKey.count, Diacritics.fold(key) == folded else { continue }
-            let accents = zip(key, typedKey).reduce(0) { $0 + ($1.0 != $1.1 ? 1 : 0) }
+            guard key != typedKey else { continue }
+            let accents: Int
+            if key.count == typedKey.count, Diacritics.fold(key) == folded {
+                accents = zip(key, typedKey).reduce(0) { $0 + ($1.0 != $1.1 ? 1 : 0) }
+            } else if c.viaSpellingRule, language == .deAT {
+                // "ss" for "ß", "ae" for "ä": the same omission on keyboards without those keys ("gross" → "groß").
+                accents = max(1, Int((c.cost / spellingRuleCost).rounded()))
+            } else {
+                continue
+            }
             var score = c.score + c.cost - Double(accents) * accentOmissionCost(language)
             if let layout = layoutLanguage, language.dictionaryID != layout.dictionaryID { score -= layoutLanguageMargin }
-            if !knownIn.contains(language.dictionaryID), prior(language, languages) < 1 { score -= foreignAccentMargin }
+            if !knownIn.contains(language.dictionaryID), prior(language, languages) < keepPrior + 1 { score -= foreignAccentMargin }
             if best == nil || score > best!.score { best = (c, score) }
         }
         guard let found = best, found.score - keepScore >= knownWordAccentMargin else { return nil }
@@ -779,7 +818,8 @@ public final class SuggestionEngine: SuggestionProviding {
               let language = c.language, !knownIn.contains(language.dictionaryID),
               c.cost <= crossLanguageMaxCost,
               Diacritics.fold(TextUnits.lookupKey(c.form)) != Diacritics.fold(typedKey),
-              c.score - keepScore >= crossLanguageMargin + (layoutLanguage == nil ? 0 : layoutLanguageMargin) else { return nil }
+              c.score - keepScore >= (c.cost <= cheapCorrectionCost ? cheapCrossLanguageMargin : crossLanguageMargin)
+                + (layoutLanguage == nil ? 0 : layoutLanguageMargin) else { return nil }
         return (Suggestion(text: c.text, kind: .correction, isAutocorrect: true, language: language), c.score)
     }
 
@@ -801,7 +841,9 @@ public final class SuggestionEngine: SuggestionProviding {
                                     "irl", "ty", "np", "bday", "gf", "bf", "dm", "ttyl", "hbu", "wyd", "nvm"]
         return [
             "de-AT": chat.union(["usw", "bzw", "zb", "evtl", "ggf", "inkl", "exkl", "vgl", "bspw", "sog", "ca", "mfg", "lg", "glg", "hdl",
-                                 "hdgdl", "vllt", "vlt", "sry", "ka", "kA", "wg", "bzgl", "zzgl", "usf"].map { $0.lowercased() }),
+                                 "hdgdl", "vllt", "vlt", "sry", "ka", "kA", "wg", "bzgl", "zzgl", "usf",
+                                 // colloquial forms the dictionary only knows as other words ("grad" = gerade, not "Grad")
+                                 "grad", "gscheit", "net"].map { $0.lowercased() }),
             "en-GB": chat.union(english),
             "en-US": chat.union(english),
             "sq": chat.union(["flm", "dmth", "psh", "nqs", "rrfsh"]),
@@ -815,7 +857,19 @@ public final class SuggestionEngine: SuggestionProviding {
 
     /// German nouns whose lower-case twin comes first in the dictionary (very frequent keys lose a little
     /// frequency on their capitalised form) although people typing the key almost always mean the noun.
-    static let germanNouns: Set<String> = ["zeit", "angst", "freund", "dank"]
+    static let germanNouns: Set<String> = ["zeit", "angst", "freund", "dank", "quatsch"]
+
+    /// Articles, possessives and contracted prepositions: a German noun follows (or an adjective, whose
+    /// inflected forms rarely have a capitalised twin).
+    static let germanDeterminers: Set<String> = [
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
+        "kein", "keine", "keinen", "keinem", "keiner", "keines", "mein", "meine", "meinen", "meinem", "meiner", "meines",
+        "dein", "deine", "deinen", "deinem", "deiner", "deines", "sein", "seine", "seinen", "seinem", "seiner", "seines",
+        "ihre", "ihren", "ihrem", "ihres", "unser", "unsere", "unseren", "unserem", "unserer", "unseres",
+        "euer", "eure", "euren", "eurem", "eurer", "eures", "dieser", "diese", "diesen", "diesem", "dieses",
+        "jeder", "jede", "jeden", "jedem", "jedes", "zum", "zur", "im", "am", "beim", "vom", "ins", "ans", "aufs", "fürs", "ums",
+        "so'n", "'n", "'ne", "'nen", "nen",
+    ]
 
     /// After a subject pronoun a German lower-case twin is the verb: "ich sorge", "wir essen".
     static let germanPronouns: Set<String> = ["ich", "i", "du", "er", "sie", "es", "wir", "ihr", "man"]

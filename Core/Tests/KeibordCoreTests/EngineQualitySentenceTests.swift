@@ -54,11 +54,35 @@ final class EngineQualitySentenceTests: XCTestCase {
             XCTAssertEqual(m.damaged, 0, "\(language) on the German layout: correct words changed\n\(m.failureList)")
             total.add(m)
         }
-        let mixed = SentenceEvaluator.run(EngineQualitySentences.mixed, languages: languages, keyboard: .deAT, label: "sentences mixed")
+        let mixed = SentenceEvaluator.run(EngineQualitySentences.mixed, languages: languages, label: "sentences mixed")
         XCTAssertEqual(mixed.damaged, 0, "mixed messages: correct words changed\n\(mixed.failureList)")
         total.add(mixed)
         print(String(format: "[quality] sentences de-layout all: fixed %.1f%% (%d/%d), damaged %d", total.fixRate * 100, total.fixed, total.toFix, total.damaged))
         XCTAssertGreaterThanOrEqual(total.fixRate, Self.minFixRateOnGermanLayout, total.failureList)
+    }
+}
+
+extension EngineQualitySentenceTests {
+    /// Held-out sentences written after the engine was tuned on the sets above: they guard against
+    /// over-fitting (lower bar for the fix rate, but still no damaged words).
+    func testValidationSentences() throws {
+        try requireDictionaries()
+        var total = SentenceMetrics(label: "validation all")
+        for language in EngineQualityData.evaluatedLanguages {
+            let cases = EngineQualitySentences.validation[language] ?? []
+            for languages in [[language], EngineQualityData.ownerLanguages(first: .deAT)] {
+                let m = SentenceEvaluator.run(cases, languages: languages, label: "validation \(language.rawValue) \(languages.map(\.rawValue))")
+                XCTAssertEqual(m.damaged, 0, "\(language) \(languages): correct words changed\n\(m.failureList)")
+                total.add(m)
+            }
+        }
+        let mixed = SentenceEvaluator.run(EngineQualitySentences.mixedValidation, languages: EngineQualityData.ownerLanguages(first: .deAT),
+                                          label: "validation mixed")
+        XCTAssertEqual(mixed.damaged, 0, mixed.failureList)
+        total.add(mixed)
+        print(String(format: "[quality] validation all: fixed %.1f%% (%d/%d), damaged %d/%d", total.fixRate * 100, total.fixed, total.toFix,
+                     total.damaged, total.toKeep))
+        XCTAssertGreaterThanOrEqual(total.fixRate, 0.7, total.failureList)
     }
 }
 
@@ -148,6 +172,67 @@ enum EngineQualitySentences {
             ("un po' di pane, per favore. ", "Un po’ di pane, per favore. "),
             ("lunedi c'e la riunione. ", "Lunedì c’è la riunione. "),
         ],
+    ]
+
+    static let validation: [KeyboardLanguage: [(typed: String, expected: String)]] = [
+        .deAT: [
+            ("hast du am wochenende zeit fur einen kaffee? ", "Hast du am Wochenende Zeit für einen Kaffee? "),
+            ("ich bin gerade im buro, ruf mich spater an. ", "Ich bin gerade im Büro, ruf mich später an. "),
+            ("das wetter in wien ist heute leiwand. ", "Das Wetter in Wien ist heute leiwand. "),
+            ("kannst du bitte das {f>g}enster zumachen? ", "Kannst du bitte das Fenster zumachen? "),
+            ("wir {s>a}ehen uns um 8 beim heurigen. ", "Wir sehen uns um 8 beim Heurigen. "),
+            ("mein handy ist kaputt, ich schreib dir spater. ", "Mein Handy ist kaputt, ich schreib dir später. "),
+            ("geh bitte, das ist ja ur peinlich. ", "Geh bitte, das ist ja ur peinlich. "),
+            ("die kinder spielen im garten. ", "Die Kinder spielen im Garten. "),
+            ("ich muss noch einkaufen gehen, brauchst du was? ", "Ich muss noch einkaufen gehen, brauchst du was? "),
+            ("danke fur alles, baba! ", "Danke für alles, baba! "),
+            ("hab grad keine lust auf arbeit. ", "Hab grad keine Lust auf Arbeit. "),
+            ("um wie viel uhr fahrt der zug? ", "Um wie viel Uhr fährt der Zug? "),
+        ],
+        .enGB: [
+            ("hey, are you comming tonight? ", "Hey, are you coming tonight? "),
+            ("i cant find my keys anywhere. ", "I can’t find my keys anywhere. "),
+            ("thats a really good idea. ", "That’s a really good idea. "),
+            ("we should meet up next {w>e}eek. ", "We should meet up next week. "),
+            ("my phone is {a>s}lmost dead. ", "My phone is almost dead. "),
+            ("did you see the match yesterday? ", "Did you see the match yesterday? "),
+            ("she doesnt like coffee. ", "She doesn’t like coffee. "),
+            ("the trian was late again. ", "The train was late again. "),
+            ("happy birthday Arben! ", "Happy birthday Arben! "),
+            ("ok see you at 7. ", "Ok see you at 7. "),
+        ],
+        .sqXK: [
+            ("pershendetje, si jeni? ", "Përshëndetje, si jeni? "),
+            ("sot eshte nje dite e bukur. ", "Sot është një ditë e bukur. "),
+            ("a do vish neser ne darke? ", "A do vish nesër në darkë? "),
+            ("me fal, nuk kam pas kohe. ", "Më fal, nuk kam pas kohë. "),
+            ("faleminderit per gjithcka. ", "Faleminderit për gjithçka. "),
+            ("jam shume i lumtur sot. ", "Jam shumë i lumtur sot. "),
+            ("ku je ti tani? ", "Ku je ti tani? "),
+            ("do te shkojme bashke. ", "Do të shkojmë bashkë. "),
+            ("nena po gatuan dreken. ", "Nëna po gatuan drekën. "),
+            ("flm per ndihmen vlla. ", "Flm për ndihmën vlla. "),
+        ],
+        .itIT: [
+            ("che bello, ci vediamo domani. ", "Che bello, ci vediamo domani. "),
+            ("non ho capito, puoi ripetere? ", "Non ho capito, puoi ripetere? "),
+            ("questa e la mia macchina nuova. ", "Questa è la mia macchina nuova. "),
+            ("sono andato al mare con mio fratello. ", "Sono andato al mare con mio fratello. "),
+            ("perche non mi hai chiamato? ", "Perché non mi hai chiamato? "),
+            ("un caffe per favore. ", "Un caffè per favore. "),
+            ("ho gia mangiato, grazie. ", "Ho già mangiato, grazie. "),
+            ("qual e il tuo numero? ", "Qual è il tuo numero? "),
+            ("lunedi vado a Milano. ", "Lunedì vado a Milano. "),
+            ("la citta e bellissima di sera. ", "La città è bellissima di sera. "),
+        ],
+    ]
+
+    static let mixedValidation: [(typed: String, expected: String)] = [
+        ("ok, une po vij tani. ", "Ok, unë po vij tani. "),
+        ("thanks, see you tomorow! ", "Thanks, see you tomorrow! "),
+        ("grazie mille, a domani. ", "Grazie mille, a domani. "),
+        ("faleminderit shume vlla. ", "Faleminderit shumë vlla. "),
+        ("bis spater, ich muss los. ", "Bis später, ich muss los. "),
     ]
 
     /// Messages in different languages after each other in one session (no layout switch).

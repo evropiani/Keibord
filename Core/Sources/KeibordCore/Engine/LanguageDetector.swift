@@ -18,7 +18,7 @@ public final class LanguageDetector {
     /// Number of informative words observed since the last reset.
     public private(set) var observationCount = 0
 
-    public init(decay: Double = 0.85, smoothing: Double = 0.5, floor: Double = -4) {
+    public init(decay: Double = 0.85, smoothing: Double = 0.25, floor: Double = -4) {
         self.decay = decay
         self.smoothing = smoothing
         self.floor = floor
