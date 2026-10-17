@@ -117,7 +117,10 @@ public struct UserModel: Codable, Equatable, Sendable {
         // make the loss permanent).
         // Counts are clamped (see `maxCount`); word pairs that were never seen are dropped.
         words = c.lossyDictionary(.words, default: [:])
-        bigrams = c.lossyDictionary(.bigrams, default: [String: Int]()).filter { $0.value > 0 }.mapValues(UserModel.clampedCount)
+        bigrams = c.lossyDictionary(.bigrams, default: [:])
+        if bigrams.values.contains(where: { $0 <= 0 || $0 > UserModel.maxCount }) {
+            bigrams = bigrams.filter { $0.value > 0 }.mapValues(UserModel.clampedCount)
+        }
         blocked = Set(c.lossyArray(.blocked, default: [String]()))
         touch = c.lossyDictionary(.touch, default: [:])
         emoji = c.lossyDictionary(.emoji, default: [:])
