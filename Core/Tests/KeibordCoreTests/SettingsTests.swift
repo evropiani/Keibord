@@ -1,0 +1,195 @@
+import XCTest
+@testable import KeibordCore
+
+/// Tolerant decoding of every persisted model: missing, extra, wrongly typed fields and values from a
+/// newer version only ever affect the field concerned.
+final class SettingsTests: XCTestCase {
+    private func decode<T: Decodable>(_ type: T.Type, _ json: String, file: StaticString = #filePath, line: UInt = #line) throws -> T {
+        try KeibordJSON.decoder().decode(T.self, from: Data(json.utf8))
+    }
+
+    private func roundTrip<T: Codable & Equatable>(_ value: T, file: StaticString = #filePath, line: UInt = #line) throws {
+        let data = try KeibordJSON.encoder().encode(value)
+        XCTAssertEqual(try KeibordJSON.decoder().decode(T.self, from: data), value, file: file, line: line)
+    }
+
+    private var customSettings: KeibordSettings {
+        var s = KeibordSettings()
+        s.enabledLanguages = [.sqXK, .deAT, .itIT]
+        s.layoutOverrides = ["sq-XK": .qwerty]
+        s.quoteStyleOverrides = ["de-AT": .guillemets]
+        s.autocorrect = false
+        s.incognito = true
+        s.haptics = .strong
+        s.keySound = true
+        s.appearance.themeMode = .dark
+        s.appearance.keyHeight = .tall
+        s.appearance.labelScale = 1.2
+        s.appearance.keyCornerRadius = 4
+        s.appearance.showNumberRow = true
+        s.appearance.lightColors = .systemDark
+        s.appearance.tintedKeys = [TintedKey(keyID: "return", color: RGBAColor(hex: "#FF0000")!),
+                                   TintedKey(keyID: "k", color: RGBAColor(hex: "#00FF00")!, labelColor: .black)]
+        return s
+    }
+
+    // MARK: KeibordSettings
+
+    func testSettingsRoundTripAndDefaults() throws {
+        try roundTrip(KeibordSettings())
+        try roundTrip(customSettings)
+        XCTAssertEqual(try decode(KeibordSettings.self, "{}"), KeibordSettings())
+        XCTAssertThrowsError(try decode(KeibordSettings.self, "[]"))
+        XCTAssertThrowsError(try decode(KeibordSettings.self, "\"settings\""))
+    }
+
+    func testUnknownEnumValuesOnlyResetTheirField() throws {
+        var json = try XCTUnwrap(String(data: KeibordJSON.encoder().encode(customSettings), encoding: .utf8))
+        json = json.replacingOccurrences(of: "\"haptics\":\"strong\"", with: "\"haptics\":\"ultra\"")
+            .replacingOccurrences(of: "\"themeMode\":\"dark\"", with: "\"themeMode\":\"sepia\"")
+            .replacingOccurrences(of: "\"keyHeight\":\"tall\"", with: "\"keyHeight\":\"huge\"")
+        XCTAssertTrue(json.contains("ultra") && json.contains("sepia") && json.contains("huge"))
+        let decoded = try decode(KeibordSettings.self, json)
+        var expected = customSettings
+        expected.haptics = KeibordSettings().haptics
+        expected.appearance.themeMode = .system
+        expected.appearance.keyHeight = .standard
+        XCTAssertEqual(decoded, expected)
+    }
+
+    func testWronglyTypedMissingAndExtraFields() throws {
+        let json = """
+        {"version": "two", "autocorrect": "yes", "incognito": true, "keySound": 1, "haptics": 3,
+         "enabledLanguages": "de-AT", "futureSetting": {"x": [1, 2]}, "predictiveText": null,
+         "appearance": {"labelScale": "big", "keyShadows": false, "showNumberRow": true, "futureColour": "#FFF",
+                        "lightColors": {"characterKey": "#FFF"}, "keyCornerRadius": 99}}
+        """
+        let s = try decode(KeibordSettings.self, json)
+        let d = KeibordSettings()
+        XCTAssertEqual(s.version, d.version)
+        XCTAssertEqual(s.autocorrect, d.autocorrect)
+        XCTAssertTrue(s.incognito)
+        XCTAssertEqual(s.keySound, d.keySound)
+        XCTAssertEqual(s.haptics, d.haptics)
+        XCTAssertEqual(s.predictiveText, d.predictiveText)
+        XCTAssertEqual(s.enabledLanguages, d.enabledLanguages)
+        XCTAssertEqual(s.appearance.labelScale, 1.0)
+        XCTAssertFalse(s.appearance.keyShadows)
+        XCTAssertTrue(s.appearance.showNumberRow)
+        XCTAssertNil(s.appearance.lightColors, "an incomplete colour scheme falls back to the system colours")
+        XCTAssertEqual(s.appearance.keyCornerRadius, 16, "clamped to the range the app offers")
+        XCTAssertEqual(try decode(KeibordSettings.self, #"{"appearance": {"labelScale": 0.1}}"#).appearance.labelScale, 0.8)
+        XCTAssertEqual(try decode(KeibordSettings.self, #"{"appearance": "dark"}"#).appearance, AppearanceSettings())
+    }
+
+    func testLanguagesAndOverridesFromANewerVersion() throws {
+        let json = """
+        {"enabledLanguages": ["fr-FR", "sq-XK", 7, "de-AT", "sq-XK", null],
+         "layoutOverrides": {"de-AT": "azerty", "sq-XK": "qwerty", "it-IT": 1},
+         "quoteStyleOverrides": {"de-AT": {"doubleOpen": "«"}, "it-IT": {"doubleOpen": "«", "doubleClose": "»", "singleOpen": "‹", "singleClose": "›", "apostrophe": "’"}}}
+        """
+        let s = try decode(KeibordSettings.self, json)
+        XCTAssertEqual(s.enabledLanguages, [.sqXK, .deAT], "unknown codes and duplicates are dropped")
+        XCTAssertEqual(s.layoutOverrides, ["sq-XK": .qwerty])
+        XCTAssertEqual(s.quoteStyleOverrides, ["it-IT": .guillemets])
+        XCTAssertEqual(s.baseLayout(for: .deAT), .qwertz)
+        XCTAssertEqual(try decode(KeibordSettings.self, #"{"enabledLanguages": ["fr-FR"]}"#).enabledLanguages, KeibordSettings().enabledLanguages)
+        XCTAssertEqual(try decode(KeibordSettings.self, #"{"enabledLanguages": []}"#).activeLanguages, KeibordSettings().enabledLanguages)
+    }
+
+    func testOneDamagedTintedKeyKeepsTheOthers() throws {
+        let json = """
+        {"appearance": {"tintedKeys": [{"keyID": "return", "color": "#FF0000"}, {"keyID": "k", "color": "not a colour"},
+          {"color": "#00FF00"}, "space", {"keyID": "space", "color": "#0000FF", "labelColor": "#XYZ", "extra": true}]}}
+        """
+        let keys = try decode(KeibordSettings.self, json).appearance.tintedKeys
+        XCTAssertEqual(keys, [TintedKey(keyID: "return", color: RGBAColor(hex: "#FF0000")!),
+                              TintedKey(keyID: "space", color: RGBAColor(hex: "#0000FF")!)])
+        try roundTrip(TintedKey(keyID: "k", color: .white, labelColor: .black))
+    }
+
+    func testEncodedKeysStayStable() throws {
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: KeibordJSON.encoder().encode(KeibordSettings())) as? [String: Any])
+        for key in ["version", "enabledLanguages", "autocorrect", "haptics", "appearance", "learnWords", "incognito", "adaptiveTouch"] {
+            XCTAssertNotNil(object[key], key)
+        }
+        XCTAssertEqual(object["enabledLanguages"] as? [String], ["de-AT", "en-GB"])
+        XCTAssertEqual(object["haptics"] as? String, "light")
+    }
+
+    // MARK: Profile
+
+    func testProfileToleratesDamagedShortcutsAndFields() throws {
+        let id = UUID()
+        let json = """
+        {"info": {"givenName": "Senad", "emails": ["a@b.at", 5, "c@d.at"], "phones": "0664", "city": 1010, "nickname": null},
+         "shortcuts": [{"id": "\(id.uuidString)", "shortcut": "lg", "phrase": "Liebe Grüße"},
+                       {"shortcut": "mfg", "phrase": "Mit freundlichen Grüßen"},
+                       {"id": "nope", "shortcut": "omw", "phrase": "On my way"},
+                       {"shortcut": "  ", "phrase": "empty"}, 42, {"id": "\(UUID().uuidString)"}],
+         "cards": [1, 2]}
+        """
+        let p = try decode(PersonalProfile.self, json)
+        XCTAssertEqual(p.info.givenName, "Senad")
+        XCTAssertEqual(p.info.emails, ["a@b.at", "c@d.at"])
+        XCTAssertEqual(p.info.phones, [])
+        XCTAssertEqual(p.info.city, "")
+        XCTAssertEqual(p.shortcuts.map(\.shortcut), ["lg", "mfg", "omw"])
+        XCTAssertEqual(p.shortcuts.first?.id, id)
+        XCTAssertEqual(Set(p.shortcuts.map(\.id)).count, 3, "missing ids are generated")
+        XCTAssertEqual(try decode(PersonalProfile.self, "{}"), PersonalProfile())
+        var full = PersonalProfile(shortcuts: [TextShortcut(shortcut: "lg", phrase: "Liebe Grüße")])
+        full.info.familyName = "Hamza"
+        full.info.usernames = ["senad"]
+        try roundTrip(full)
+    }
+
+    // MARK: UserModel and runtime state
+
+    func testUserModelKeepsEverythingButTheDamagedEntries() throws {
+        let json = """
+        {"version": 1, "futureField": true,
+         "words": {"Paradeiser": {"count": 5, "lastUsedDay": 20000, "language": "de-AT", "addedManually": false},
+                   "leiwand": {"count": 3, "lastUsedDay": 20001},
+                   "kaputt": {"count": "many"}, "kaputt2": "x", "neu": {},
+                   "minus": {"count": -4, "lastUsedDay": 1, "addedManually": true, "language": 7}},
+         "bigrams": {"voll\\u001fleiwand": 2, "bad\\u001fpair": "2"},
+         "blocked": ["fuck", 3, "oida"],
+         "touch": {"g|a": {"sumDX": 1.5, "sumDY": -0.5, "count": 12}, "g|b": {"count": "x"}, "g|c": [1]},
+         "emoji": {"😂": {"count": 2, "lastUsed": 1700000000}, "❤️": {"count": 1}, "👍": 5},
+         "languageUsage": {"de-AT": 10, "sq-XK": "x"}}
+        """
+        let m = try decode(UserModel.self, json)
+        XCTAssertEqual(m.words["Paradeiser"], LearnedWord(count: 5, lastUsedDay: 20000, language: "de-AT"))
+        XCTAssertEqual(m.words["leiwand"], LearnedWord(count: 3, lastUsedDay: 20001), "fields added later default")
+        XCTAssertEqual(m.words["kaputt"], LearnedWord(count: 1, lastUsedDay: 0))
+        XCTAssertNil(m.words["kaputt2"])
+        XCTAssertEqual(m.words["neu"], LearnedWord(count: 1, lastUsedDay: 0))
+        XCTAssertEqual(m.words["minus"], LearnedWord(count: 0, lastUsedDay: 1, addedManually: true))
+        XCTAssertEqual(m.bigrams, ["voll\u{1F}leiwand": 2])
+        XCTAssertEqual(m.blocked, ["fuck", "oida"])
+        XCTAssertEqual(m.touch["g|a"], TouchStat(sumDX: 1.5, sumDY: -0.5, count: 12))
+        XCTAssertEqual(m.touch["g|b"], TouchStat())
+        XCTAssertNil(m.touch["g|c"])
+        XCTAssertEqual(m.emoji["😂"], EmojiStat(count: 2, lastUsed: 1_700_000_000))
+        XCTAssertEqual(m.emoji["❤️"], EmojiStat(count: 1, lastUsed: 0))
+        XCTAssertNil(m.emoji["👍"])
+        XCTAssertEqual(m.languageUsage, ["de-AT": 10])
+        XCTAssertEqual(try decode(UserModel.self, #"{"words": [1, 2], "blocked": "x"}"#), UserModel())
+        try roundTrip(m)
+    }
+
+    func testKeyboardRuntimeState() throws {
+        let state = KeyboardRuntimeState(currentLanguage: .sqXK, lastActive: Date(timeIntervalSince1970: 1_760_000_000), hasFullAccess: true,
+                                         keyboardVersion: "1.0.0 (1)", appGroupIdentifier: "group.com.keibord.app")
+        try roundTrip(state)
+        let s = try decode(KeyboardRuntimeState.self, #"{"currentLanguage": "fr-FR", "lastActive": "yesterday", "hasFullAccess": "yes", "keyboardVersion": 1, "appGroupIdentifier": "group.x", "new": 1}"#)
+        XCTAssertEqual(s, KeyboardRuntimeState(appGroupIdentifier: "group.x"))
+        XCTAssertEqual(try decode(KeyboardRuntimeState.self, "{}"), KeyboardRuntimeState())
+    }
+
+    func testFileNames() {
+        XCTAssertEqual(Set(KeibordFile.allCases.map(\.rawValue)).count, KeibordFile.allCases.count)
+        XCTAssertEqual(KeibordFile.userModel.rawValue, "user-model.json")
+    }
+}

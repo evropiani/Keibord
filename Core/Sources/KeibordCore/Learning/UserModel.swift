@@ -97,7 +97,7 @@ public struct UserModel: Codable, Equatable, Sendable {
     public init() {}
 
     public static func bigramKey(_ previous: String, _ next: String) -> String {
-        TextUnits.lookupKey(previous) + String(bigramSeparator) + TextUnits.lookupKey(next)
+        LexiconKey.string(previous) + String(bigramSeparator) + LexiconKey.string(next)
     }
 
     public static func touchKey(layout: String, keyID: String) -> String {

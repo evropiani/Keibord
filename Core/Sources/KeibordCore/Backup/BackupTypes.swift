@@ -18,6 +18,22 @@ public struct BackupPayload: Codable, Equatable, Sendable {
         self.profile = profile
         self.userModel = userModel
     }
+
+    private enum CodingKeys: String, CodingKey { case formatVersion, createdAt, appVersion, settings, profile, userModel }
+
+    /// Tolerant like every persisted model; only a payload without any data is rejected.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard c.contains(.settings) || c.contains(.userModel) || c.contains(.profile) else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Backup payload without data"))
+        }
+        formatVersion = c.value(.formatVersion, default: 1)
+        createdAt = c.value(.createdAt, default: Date(timeIntervalSince1970: 0))
+        appVersion = c.value(.appVersion, default: "")
+        settings = c.value(.settings, default: KeibordSettings())
+        profile = c.optionalValue(.profile, as: PersonalProfile.self)
+        userModel = c.value(.userModel, default: UserModel())
+    }
 }
 
 /// Password-based encryption used for encrypted exports. Implemented on iOS with

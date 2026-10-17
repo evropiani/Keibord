@@ -36,7 +36,7 @@ public struct UserModelDelta: Equatable, Sendable {
             }
             // The correction was learned when it was committed (autocorrect then backspace): take that
             // back so rejected corrections are not reinforced. Applying never drops a count below 0.
-            if TextUnits.lookupKey(correction) != TextUnits.lookupKey(typed), LearningPolicy.isLearnable(correction) {
+            if LexiconKey.string(correction) != LexiconKey.string(typed), LearningPolicy.isLearnable(correction) {
                 unlearnWord(correction)
             }
         case .usedEmoji(let e):
@@ -68,7 +68,7 @@ public struct UserModelDelta: Equatable, Sendable {
     /// Learns where the user taps each letter key. Taps align with the letters of the final word (same
     /// length, compared by lookup key); only letter keys with a finite offset are recorded.
     private mutating func recordTouches(word: String, taps: [TapInput]) {
-        let letters = Array(TextUnits.lookupKey(word))
+        let letters = Array(LexiconKey.string(word))
         guard letters.count == taps.count else { return }
         for (i, tap) in taps.enumerated() where letters[i].isLetter && !tap.touchModelKey.isEmpty {
             let letter = String(letters[i])
@@ -114,7 +114,7 @@ public extension UserModel {
     /// again; negative word counts lower the stored count and drop words that reach zero (manually
     /// added words stay).
     mutating func apply(_ delta: UserModelDelta) {
-        for (word, d) in delta.words where !blocked.contains(TextUnits.lookupKey(word)) {
+        for (word, d) in delta.words where !blocked.contains(LexiconKey.string(word)) {
             if d.count < 0 {
                 guard var w = words[word] else { continue }
                 w.count = max(0, w.count + d.count)
@@ -187,7 +187,7 @@ public extension UserModel {
         for (word, w) in other.words where w.addedManually { result.words[word]?.addedManually = true }
         if !result.blocked.isEmpty {
             let blocked = result.blocked
-            result.words = result.words.filter { !blocked.contains(TextUnits.lookupKey($0.key)) }
+            result.words = result.words.filter { !blocked.contains(LexiconKey.string($0.key)) }
             result.bigrams = result.bigrams.filter { !UserModel.bigram($0.key, mentionsAnyOf: blocked) }
         }
         return result
@@ -209,7 +209,7 @@ public extension UserModel {
         }
         var byKey: [String: Candidate] = [:]
         for (word, w) in words where w.count > 0 || w.addedManually {
-            let key = TextUnits.lookupKey(word)
+            let key = LexiconKey.string(word)
             guard !key.isEmpty, !blocked.contains(key) else { continue }
             let weight = w.addedManually ? max(w.count, minCount) : w.count
             guard var c = byKey[key] else {
@@ -255,7 +255,7 @@ public extension UserModel {
     mutating func addWord(_ word: String, day: Int = UserModelDelta.today()) {
         let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        blocked.remove(TextUnits.lookupKey(trimmed))
+        blocked.remove(LexiconKey.string(trimmed))
         var w = words[trimmed] ?? LearnedWord(count: 0, lastUsedDay: day)
         w.addedManually = true
         w.count = max(w.count, LearningPolicy.knownThreshold)
@@ -266,23 +266,23 @@ public extension UserModel {
     /// other casing of the word is left.
     mutating func removeWord(_ word: String) {
         words[word] = nil
-        let key = TextUnits.lookupKey(word)
-        guard !key.isEmpty, !words.keys.contains(where: { TextUnits.lookupKey($0) == key }) else { return }
+        let key = LexiconKey.string(word)
+        guard !key.isEmpty, !words.keys.contains(where: { LexiconKey.string($0) == key }) else { return }
         removeBigrams(containing: key)
     }
 
     /// Blocks a word: all its casings and word pairs are removed and it is never learned again.
     mutating func block(_ word: String) {
-        let key = TextUnits.lookupKey(word.trimmingCharacters(in: .whitespacesAndNewlines))
+        let key = LexiconKey.string(word.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !key.isEmpty else { return }
         blocked.insert(key)
-        words = words.filter { TextUnits.lookupKey($0.key) != key }
+        words = words.filter { LexiconKey.string($0.key) != key }
         removeBigrams(containing: key)
     }
 
     mutating func unblock(_ word: String) {
-        blocked.remove(TextUnits.lookupKey(word))
-        blocked.remove(TextUnits.lookupKey(word.trimmingCharacters(in: .whitespacesAndNewlines)))
+        blocked.remove(LexiconKey.string(word))
+        blocked.remove(LexiconKey.string(word.trimmingCharacters(in: .whitespacesAndNewlines)))
     }
 
     mutating func resetTouch() { touch = [:] }

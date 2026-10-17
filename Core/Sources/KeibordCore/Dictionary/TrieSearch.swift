@@ -100,6 +100,14 @@ enum LexiconKey {
         return supported ? result : nil
     }
 
+    /// `TextUnits.lookupKey(text)`, several times faster for Latin text (used when keying many
+    /// learned words at once).
+    static func string(_ text: String) -> String {
+        var text = text
+        if let units = text.withUTF8(fastUnits) { return String(decoding: units, as: UTF16.self) }
+        return TextUnits.lookupKey(text)
+    }
+
     static func slowUnits(_ text: String) -> [UInt16]? {
         let units = Array(TextUnits.lookupKey(text).utf16)
         return units.contains(where: isSurrogate) ? nil : units
