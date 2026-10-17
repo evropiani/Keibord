@@ -19,6 +19,8 @@ final class EngineQualityTests: XCTestCase {
     static let minTop3: [KeyboardLanguage: Double] = [.deAT: 0.92, .enGB: 0.92, .sqXK: 0.92, .itIT: 0.92]
     /// Accuracy floor with all four of the owner's languages enabled (layout language first).
     static let minMultilingualAccuracy = 0.80
+    /// Categories whose typed form may be a dictionary key.
+    static let knownTypoCategories: Set<String> = ["case", "variety"]
 
     private func requireDictionaries() throws {
         guard EngineQualityHarness.available else { throw XCTSkip("dictionaries not built") }
@@ -35,7 +37,11 @@ final class EngineQualityTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(cases.count, 40, "\(language): at least 40 typo cases")
             for c in cases {
                 if !h.isDictionaryWord(c.intended, language) { problems.append("\(language) intended not in dictionary: \(c.intended)") }
-                if c.category != "case", h.isKnownKey(c.typed, language) { problems.append("\(language) typo is a known word: \(c.typed)") }
+                // Case corrections and British spellings of American words ("center" is also the name "Center")
+                // start from known keys; every other typo must be an unknown word.
+                if !Self.knownTypoCategories.contains(c.category), h.isKnownKey(c.typed, language) {
+                    problems.append("\(language) typo is a known word: \(c.typed)")
+                }
             }
             for c in EngineQualityData.completionCases(for: language) where !h.isDictionaryWord(c.intended, language) {
                 problems.append("\(language) completion not in dictionary: \(c.intended)")
