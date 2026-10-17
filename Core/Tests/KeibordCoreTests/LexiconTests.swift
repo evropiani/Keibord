@@ -601,7 +601,15 @@ final class LexiconTests: XCTestCase {
             XCTAssertGreaterThan(lexicon.wordCount, 1000, url.lastPathComponent)
             XCTAssertLessThanOrEqual(lexicon.wordCount, 250_000, url.lastPathComponent)
             XCTAssertLessThanOrEqual(stats.fileSize, 12 << 20, url.lastPathComponent)
-            XCTAssertLessThanOrEqual(stats.mismatchedKeys ?? 0, stats.wordCount / 1000, url.lastPathComponent)
+            XCTAssertEqual(stats.mismatchedKeys, 0, "\(url.lastPathComponent): every trie path is the word's lookup key")
+            XCTAssertEqual(stats.wordCount, lexicon.wordCount, url.lastPathComponent)
+            XCTAssertLessThanOrEqual(stats.maxKeyLength, 64, url.lastPathComponent)
+            // A spread of words: each is found by its lookup key (fast and Foundation key paths agree).
+            for i in stride(from: 0, to: lexicon.wordCount, by: max(1, lexicon.wordCount / 2000)) {
+                let word = lexicon.word(i)
+                XCTAssertEqual(LexiconKey.string(word), TextUnits.lookupKey(word), "\(id) key of \(word)")
+                XCTAssertTrue(lexicon.lookup(key: TextUnits.lookupKey(word)).contains(i), "\(id) \(word)")
+            }
             let top = lexicon.word(0)
             XCTAssertTrue(lexicon.lookup(key: TextUnits.lookupKey(top)).contains(0), url.lastPathComponent)
             XCTAssertEqual(lexicon.completions(prefix: "", limit: 3), [0, 1, 2], url.lastPathComponent)
