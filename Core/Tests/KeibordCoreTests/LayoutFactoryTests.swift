@@ -59,6 +59,15 @@ final class LayoutFactoryTests: XCTestCase {
                 XCTAssertEqual(layout.variant, r.variant, what)
                 XCTAssertGreaterThan(layout.unitCount, 0, what)
                 XCTAssertFalse(layout.touchModelKey.isEmpty, what)
+                switch (r.variant, r.page) {
+                case (.numberPad, _), (.decimalPad, _):
+                    XCTAssertEqual(layout.touchModelKey, "pad.\(r.variant.rawValue)", what)
+                case (_, .letters):
+                    // Letter geometry does not depend on the field variant ⇒ one shared touch model.
+                    XCTAssertEqual(layout.touchModelKey, "\(r.base.rawValue)\(Int(layout.unitCount)).letters.standard", what)
+                default:
+                    XCTAssertEqual(layout.touchModelKey, "sym10.\(r.page.rawValue).\(r.variant.rawValue)", what)
+                }
                 XCTAssertGreaterThanOrEqual(layout.rows.count, 4, what)
                 for (i, row) in layout.rows.enumerated() {
                     XCTAssertFalse(row.keys.isEmpty, "\(what) row \(i) empty")

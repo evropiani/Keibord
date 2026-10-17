@@ -116,18 +116,31 @@ public struct TouchResolver {
     public let frames: [KeyFrame]
     public let offsets: [String: (dx: Double, dy: Double)]
     public let touchModelKey: String
+    /// Vertical extent of every row that has interactive keys, top to bottom.
     private let rowBands: [(row: Int, minY: CGFloat, maxY: CGFloat)]
+    /// Positions in `frames` of the interactive keys of each band (parallel to `rowBands`).
+    private let rowKeys: [[Int]]
+    /// Positions in `frames` of all letter keys.
+    private let letterPositions: [Int]
 
     public init(frames: [KeyFrame], offsets: [String: (dx: Double, dy: Double)] = [:], touchModelKey: String = "") {
         self.frames = frames
         self.offsets = offsets.mapValues { (dx: Self.clampOffset($0.dx), dy: Self.clampOffset($0.dy)) }
         self.touchModelKey = touchModelKey
-        var bands: [Int: (CGFloat, CGFloat)] = [:]
-        for f in frames {
-            let b = bands[f.row] ?? (f.rect.minY, f.rect.maxY)
-            bands[f.row] = (min(b.0, f.rect.minY), max(b.1, f.rect.maxY))
+        var bands: [Int: (minY: CGFloat, maxY: CGFloat, keys: [Int])] = [:]
+        var letters: [Int] = []
+        for (position, f) in frames.enumerated() where f.key.isInteractive {
+            var b = bands[f.row] ?? (minY: f.rect.minY, maxY: f.rect.maxY, keys: [])
+            b.minY = min(b.minY, f.rect.minY)
+            b.maxY = max(b.maxY, f.rect.maxY)
+            b.keys.append(position)
+            bands[f.row] = b
+            if Self.isLetter(f) { letters.append(position) }
         }
-        rowBands = bands.keys.sorted().map { (row: $0, minY: bands[$0]!.0, maxY: bands[$0]!.1) }
+        let rows = bands.keys.sorted()
+        rowBands = rows.map { (row: $0, minY: bands[$0]!.minY, maxY: bands[$0]!.maxY) }
+        rowKeys = rows.map { bands[$0]!.keys }
+        letterPositions = letters
     }
 
     /// Learned offsets are clamped to ±0.25 key sizes; NaN (corrupt statistics) counts as no offset.
@@ -135,7 +148,7 @@ public struct TouchResolver {
         value.isNaN ? 0 : min(0.25, max(-0.25, value))
     }
 
-    private func isLetter(_ f: KeyFrame) -> Bool { f.key.style == .character && f.key.isLetter }
+    private static func isLetter(_ f: KeyFrame) -> Bool { f.key.style == .character && f.key.isLetter }
 
     private func normalizedDistance(_ p: CGPoint, _ f: KeyFrame, adjusted: Bool) -> (d: Double, dx: Double, dy: Double) {
         let w = Double(max(f.rect.width, 1)), h = Double(max(f.rect.height, 1))
@@ -149,29 +162,36 @@ public struct TouchResolver {
         return ((ndx * ndx + ndy * ndy).squareRoot(), rawDX, rawDY)
     }
 
+    /// The key hit at `point` and its spatial `TapInput`. `frameIndex` is the position in `frames`
+    /// (equal to `KeyFrame.index` for the output of `LayoutGeometry.frames`).
+    ///
+    /// The row is the band containing `y` (vertical gaps split halfway, touches above/below the
+    /// keyboard go to the first/last row); within it the horizontally nearest interactive key wins.
+    /// A letter is then re-decided among the letters of that row and its neighbours by the
+    /// key-size-normalised distance to their offset-adjusted centres, so learned offsets can move
+    /// the boundary between two letters (never onto a function key).
     public func resolve(_ point: CGPoint) -> (frameIndex: Int, tap: TapInput)? {
-        guard !rowBands.isEmpty else { return nil }
-        // Row: the band containing y (gaps split halfway), clamped to the first/last row.
-        var row = rowBands[0].row
-        for (i, band) in rowBands.enumerated() {
-            let lower = i + 1 < rowBands.count ? (band.maxY + rowBands[i + 1].minY) / 2 : .greatestFiniteMagnitude
-            row = band.row
-            if point.y < lower { break }
+        guard !rowBands.isEmpty, point.x.isFinite, point.y.isFinite else { return nil }
+        var band = 0
+        while band + 1 < rowBands.count, point.y >= (rowBands[band].maxY + rowBands[band + 1].minY) / 2 {
+            band += 1
         }
-        let inRow = frames.filter { $0.row == row && $0.key.isInteractive }
-        guard !inRow.isEmpty else { return nil }
-        var hit = inRow.min { a, b in
-            horizontalDistance(point.x, a.rect) < horizontalDistance(point.x, b.rect)
-        }!
-        if isLetter(hit) {
-            // Re-decide among nearby letters with the learned offsets (may switch to an adjacent row).
-            let letters = frames.filter { isLetter($0) && abs($0.row - row) <= 1 }
-            if let best = letters.min(by: { normalizedDistance(point, $0, adjusted: true).d < normalizedDistance(point, $1, adjusted: true).d }),
-               normalizedDistance(point, best, adjusted: true).d < normalizedDistance(point, hit, adjusted: true).d {
-                hit = best
+        var best = CGFloat.greatestFiniteMagnitude
+        var hit = -1
+        for position in rowKeys[band] {
+            let d = horizontalDistance(point.x, frames[position].rect)
+            if d < best { best = d; hit = position }
+        }
+        guard hit >= 0 else { return nil }
+        if Self.isLetter(frames[hit]) {
+            let row = rowBands[band].row
+            var bestDistance = normalizedDistance(point, frames[hit], adjusted: true).d
+            for position in letterPositions where position != hit && abs(frames[position].row - row) <= 1 {
+                let d = normalizedDistance(point, frames[position], adjusted: true).d
+                if d < bestDistance { bestDistance = d; hit = position }
             }
         }
-        return (hit.index, tap(at: point, hit: hit))
+        return (hit, tap(at: point, hit: frames[hit]))
     }
 
     private func horizontalDistance(_ x: CGFloat, _ r: CGRect) -> CGFloat {
@@ -180,8 +200,11 @@ public struct TouchResolver {
         return 0
     }
 
+    /// Candidates: the hit key (cost 0) followed by every other letter within 1.6 key sizes of the
+    /// touch, cost `2.5 · (d² − d_hit²) · log2(e)` bits, distances to the offset-adjusted centres;
+    /// `dx`/`dy` are always relative to the key's drawn (raw) centre.
     private func tap(at point: CGPoint, hit: KeyFrame) -> TapInput {
-        guard isLetter(hit) else {
+        guard Self.isLetter(hit) else {
             if hit.key.style == .character, case .insert(let text) = hit.key.action {
                 let d = normalizedDistance(point, hit, adjusted: false)
                 return TapInput(candidates: [TapCandidate(character: text.lowercased(), cost: 0, dx: d.dx, dy: d.dy)], touchModelKey: touchModelKey)
@@ -191,7 +214,8 @@ public struct TouchResolver {
         let hitD = normalizedDistance(point, hit, adjusted: true)
         var others: [TapCandidate] = []
         let log2e = 1.4426950408889634
-        for f in frames where isLetter(f) && f.index != hit.index && f.key.id != hit.key.id {
+        for position in letterPositions where frames[position].key.id != hit.key.id {
+            let f = frames[position]
             let d = normalizedDistance(point, f, adjusted: true)
             guard d.d <= 1.6 else { continue }
             let cost = max(0, 2.5 * (d.d * d.d - hitD.d * hitD.d) * log2e)
@@ -206,7 +230,8 @@ public struct TouchResolver {
     /// A tap at the centre of the key for `character` (used when no real touch is available).
     public func syntheticTap(for character: String) -> TapInput {
         let c = character.lowercased()
-        guard let f = frames.first(where: { isLetter($0) && $0.key.id == c }) else { return .exact(c) }
+        guard let position = letterPositions.first(where: { frames[$0].key.id == c }) else { return .exact(c) }
+        let f = frames[position]
         return tap(at: CGPoint(x: f.rect.midX, y: f.rect.midY), hit: f)
     }
 }

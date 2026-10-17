@@ -71,8 +71,12 @@ public enum LayoutFactory {
         third += [spacers.next(), function("backspace", .backspace, width: 1.3 * s)]
         out.append(KeyRow(keys: third))
         out.append(bottomRow(r, pageKey: function("numbers", .switchPage(.numbers), label: "123", width: 1.25 * s), scale: s, above: out))
+        // The field variant only changes the bottom row, never the letter keys, so every variant
+        // shares one touch model (`….letters.standard`) instead of fragmenting the learned offsets
+        // (e.g. Safari's web-search field would otherwise learn separately and rarely reach the
+        // sample threshold).
         return KeyboardLayout(language: lang, page: .letters, variant: r.variant, rows: out, unitCount: unitCount,
-                              touchModelKey: "\(r.base.rawValue)\(Int(unitCount)).letters.\(r.variant.rawValue)")
+                              touchModelKey: "\(r.base.rawValue)\(Int(unitCount)).letters.\(LayoutVariant.standard.rawValue)")
     }
 
     private static func punctuationRow(_ r: LayoutRequest, pageKey: KeySpec) -> KeyRow {

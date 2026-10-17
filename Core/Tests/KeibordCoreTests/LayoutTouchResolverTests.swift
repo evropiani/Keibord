@@ -1,6 +1,20 @@
 import XCTest
 @testable import KeibordCore
 
+/// Deterministic random numbers so failures are reproducible.
+private struct SplitMix64: RandomNumberGenerator {
+    var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+    mutating func nextDouble(in range: ClosedRange<Double>) -> Double { Double.random(in: range, using: &self) }
+}
+
 final class LayoutTouchResolverTests: XCTestCase {
     typealias S = LayoutTestSupport
 
@@ -47,8 +61,69 @@ final class LayoutTouchResolverTests: XCTestCase {
         }
     }
 
+    /// Without learned offsets, every point of a key — corners included — resolves to that key, for
+    /// every letter layout, width and key height (the staggered rows make the corners the hardest case).
+    func testKeyCornersHitTheirKeyEverywhere() {
+        var failures: [String] = []
+        for language in KeyboardLanguage.allCases {
+            for base in BaseLayout.allCases {
+                for numberRow in [false, true] {
+                    let r = LayoutRequest(language: language, base: base, showNumberRow: numberRow, showLanguageKey: true, showGlobeKey: numberRow)
+                    for (widths, landscape) in [([CGFloat(320), 375, 393, 402, 430, 440], false), ([CGFloat(667), 852, 932], true)] {
+                        for height in KeyHeightOption.allCases {
+                            let m = KeyboardMetrics.standard(height: height, landscape: landscape)
+                            for width in widths {
+                                let (_, frames, resolver) = make(r, width: width, metrics: m)
+                                for f in frames where f.key.isInteractive {
+                                    let e = f.rect.insetBy(dx: 0.25, dy: 0.25)
+                                    for p in [CGPoint(x: e.minX, y: e.minY), CGPoint(x: e.maxX, y: e.minY), CGPoint(x: e.minX, y: e.maxY),
+                                              CGPoint(x: e.maxX, y: e.maxY), CGPoint(x: e.midX, y: e.minY), CGPoint(x: e.midX, y: e.maxY)] {
+                                        if let hit = resolver.resolve(p), hit.frameIndex != f.index {
+                                            failures.append("\(S.describe(r)) \(width) \(height): \(f.key.id) at \(p) → \(frames[hit.frameIndex].key.id)")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertTrue(failures.isEmpty, "\(failures.count) misses, e.g. \(failures.prefix(5))")
+    }
+
+    /// Key centres can never be taken over by a neighbour, whatever the (clamped) learned offsets.
+    func testKeyCentresSurviveAnyLearnedOffsets() {
+        var rng = SplitMix64(seed: 7)
+        for (language, base) in [(KeyboardLanguage.deAT, BaseLayout.qwertz), (.enGB, .qwerty), (.sqXK, .qwertz), (.itIT, .qwerty)] {
+            let layout = LayoutFactory.layout(for: LayoutRequest(language: language, base: base, showNumberRow: true))
+            for (width, landscape) in [(CGFloat(320), false), (393, false), (932, true)] {
+                for height in KeyHeightOption.allCases {
+                    let m = KeyboardMetrics.standard(height: height, landscape: landscape)
+                    let frames = LayoutGeometry.frames(for: layout, width: width, metrics: m)
+                    for _ in 0..<20 {
+                        var offsets: [String: (dx: Double, dy: Double)] = [:]
+                        for key in layout.allKeys where key.isLetter {
+                            offsets[key.id] = (dx: rng.nextDouble(in: -2...2), dy: rng.nextDouble(in: -2...2))
+                        }
+                        let resolver = TouchResolver(frames: frames, offsets: offsets, touchModelKey: layout.touchModelKey)
+                        for f in frames where f.key.isInteractive {
+                            let hit = resolver.resolve(centre(f))
+                            XCTAssertEqual(hit?.frameIndex, f.index, "\(language) \(width) \(height) \(f.key.id)")
+                            if f.key.isLetter {
+                                XCTAssertEqual(hit?.tap.primary, f.key.id)
+                                XCTAssertEqual(hit?.tap.candidates.first?.cost, 0)
+                                XCTAssertTrue(hit?.tap.candidates.dropFirst().allSatisfy { $0.cost >= 0 && $0.cost.isFinite } ?? false)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     func testRandomInteriorPointsHitTheirKey() {
-        var rng = SystemRandomNumberGenerator()
+        var rng = SplitMix64(seed: 42)
         for r in S.allRequests() where r.returnKind == .default && r.showNumberRow == (r.language == .deAT) {
             let (_, frames, resolver) = make(r, width: 375)
             for f in frames where f.key.isInteractive {
@@ -118,6 +193,36 @@ final class LayoutTouchResolverTests: XCTestCase {
     func testEmptyResolver() {
         XCTAssertNil(TouchResolver(frames: []).resolve(.zero))
         XCTAssertEqual(TouchResolver(frames: []).syntheticTap(for: "a"), .exact("a"))
+        let (_, _, resolver) = make(LayoutRequest(language: .deAT, base: .qwertz))
+        XCTAssertNil(resolver.resolve(CGPoint(x: CGFloat.nan, y: 100)))
+        XCTAssertNil(resolver.resolve(CGPoint(x: 100, y: CGFloat.infinity)))
+    }
+
+    /// `frameIndex` indexes the frames the resolver was built from, even when the caller dropped
+    /// the spacers (as the settings preview does for drawing).
+    func testFrameIndexIsThePositionInTheGivenFrames() {
+        let layout = LayoutFactory.layout(for: LayoutRequest(language: .enUS, base: .qwerty, showLanguageKey: true))
+        let all = LayoutGeometry.frames(for: layout, width: 393, metrics: portrait)
+        let visible = all.filter { $0.key.style != .spacer }
+        let resolver = TouchResolver(frames: visible, touchModelKey: layout.touchModelKey)
+        for (position, f) in visible.enumerated() {
+            let hit = resolver.resolve(centre(f))
+            XCTAssertEqual(hit?.frameIndex, position, f.key.id)
+            XCTAssertEqual(hit.map { visible[$0.frameIndex].key.id }, f.key.id)
+        }
+    }
+
+    /// Rows without interactive keys don't capture touches; they go to the nearest real row.
+    func testSpacerOnlyRowsAreSkipped() {
+        let spacer = KeySpec(id: "spacer.0", action: .none, label: "", width: .fill, style: .spacer)
+        let a = KeySpec(id: "a", action: .insert("a"), label: "a", style: .character, isLetter: true)
+        let b = KeySpec(id: "b", action: .insert("b"), label: "b", style: .character, isLetter: true)
+        let layout = KeyboardLayout(language: .enUS, page: .letters, variant: .standard,
+                                    rows: [KeyRow(keys: [a]), KeyRow(keys: [spacer]), KeyRow(keys: [b])], unitCount: 1)
+        let frames = LayoutGeometry.frames(for: layout, width: 100, metrics: portrait)
+        let resolver = TouchResolver(frames: frames)
+        XCTAssertEqual(resolver.resolve(CGPoint(x: 50, y: frames[1].rect.midY - 5))?.tap.primary, "a")
+        XCTAssertEqual(resolver.resolve(CGPoint(x: 50, y: frames[1].rect.midY + 5))?.tap.primary, "b")
     }
 
     // MARK: Learned offsets
