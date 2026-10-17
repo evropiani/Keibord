@@ -266,7 +266,13 @@ final class BackupTests: XCTestCase {
         importedProfile.info.phones = ["+43 664 000000"]
         importedProfile.shortcuts += [TextShortcut(shortcut: "mfg", phrase: "Mit freundlichen Grüßen"),
                                       TextShortcut(shortcut: " MFG ", phrase: "duplicate in the import"),
-                                      TextShortcut(id: currentProfile.shortcuts[0].id, shortcut: "gn8", phrase: "Gute Nacht")]
+                                      TextShortcut(id: currentProfile.shortcuts[0].id, shortcut: "gn8", phrase: "Gute Nacht"),
+                                      // Typed alike (the engine matches by lookup key): duplicates.
+                                      TextShortcut(shortcut: "grüß", phrase: "Liebe Grüße"),
+                                      TextShortcut(shortcut: "Gru\u{308}ß", phrase: "decomposed"),
+                                      TextShortcut(shortcut: "GRÜß", phrase: "upper case"),
+                                      TextShortcut(shortcut: "c’ya", phrase: "See you"),
+                                      TextShortcut(shortcut: "C'YA", phrase: "straight apostrophe")]
         var imported = payload
         imported.profile = importedProfile
 
@@ -284,9 +290,9 @@ final class BackupTests: XCTestCase {
         XCTAssertEqual(profile.info.phones, ["+43 664 000000"])
         XCTAssertEqual(profile.info.city, "Wien", "the address on this device is kept as a whole")
         XCTAssertEqual(profile.info.postalCode, "")
-        XCTAssertEqual(profile.shortcuts.map(\.shortcut), ["LG", "lgx", "mfg", "gn8"])
+        XCTAssertEqual(profile.shortcuts.map(\.shortcut), ["LG", "lgx", "mfg", "gn8", "grüß", "c’ya"])
         XCTAssertEqual(profile.shortcuts[0].phrase, "Lg, Senad", "this device wins for an existing shortcut")
-        XCTAssertEqual(Set(profile.shortcuts.map(\.id)).count, 4, "ids stay unique")
+        XCTAssertEqual(Set(profile.shortcuts.map(\.id)).count, 6, "ids stay unique")
 
         XCTAssertEqual(model.words["leiwand"], LearnedWord(count: 5, lastUsedDay: 20_005, language: "de-AT"))
         XCTAssertNil(model.words["oida"], "blocked in the backup")

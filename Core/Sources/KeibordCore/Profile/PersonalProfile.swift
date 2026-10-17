@@ -129,9 +129,10 @@ public struct PersonalProfile: Codable, Equatable, Sendable {
 }
 
 extension TextShortcut {
-    /// Shortcuts are matched case-insensitively and ignoring surrounding whitespace.
+    /// Shortcuts are matched like the suggestion engine matches typed words: by lookup key (case,
+    /// Unicode normalisation and apostrophe style ignored), without surrounding whitespace.
     static func matchKey(_ shortcut: String) -> String {
-        shortcut.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        TextUnits.lookupKey(shortcut.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 
