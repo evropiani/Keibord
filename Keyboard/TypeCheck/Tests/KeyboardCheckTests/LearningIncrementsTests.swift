@@ -157,4 +157,36 @@ final class LearningIncrementsTests: XCTestCase {
         XCTAssertEqual(inc.emoji["😀"]?.count, 1)
         XCTAssertEqual(inc.words["ab"]?.count, 1)
     }
+
+    func testMergeAddsAFailedDeltaAndKeepsTheRetractableCommit() {
+        var older = UserModelDelta()
+        older.record(.committedWord(final: "Servus", typed: "Servus", previous: nil, language: .deAT, taps: nil, wasAutocorrected: false), day: 100, now: 1)
+        older.record(.usedEmoji("\u{1F600}"), day: 100, now: 1)
+        var pending = UserModelDelta()
+        pending.record(.committedWord(final: "oida", typed: "oida", previous: "Servus", language: .deAT, taps: nil, wasAutocorrected: false), day: 101, now: 2)
+        pending.record(.committedWord(final: "Servus", typed: "Servis", previous: "oida", language: .deAT, taps: nil, wasAutocorrected: true), day: 101, now: 2)
+        pending.merge(older)
+        XCTAssertEqual(pending.words["Servus"]?.count, 2)
+        XCTAssertEqual(pending.words["Servus"]?.lastUsedDay, 101)
+        XCTAssertEqual(pending.words["oida"]?.count, 1)
+        XCTAssertEqual(pending.languageUsage["de-AT"], 3)
+        XCTAssertEqual(pending.emoji["\u{1F600}"]?.count, 1)
+        // A backspace right after the autocorrection still takes back what that commit learned.
+        pending.record(.rejectedCorrection(typed: "Servis", correction: "Servus"), day: 101, now: 3)
+        XCTAssertEqual(pending.words["Servus"]?.count, 1)
+        XCTAssertEqual(pending.languageUsage["de-AT"], 2)
+        XCTAssertNil(pending.bigrams[UserModel.bigramKey("oida", "Servus")])
+
+        // Applying the merged delta equals applying both deltas.
+        var newer = UserModelDelta()
+        newer.record(.committedWord(final: "oida", typed: "oida", previous: "Servus", language: .deAT, taps: nil, wasAutocorrected: false), day: 101, now: 2)
+        var both = UserModel()
+        both.apply(older)
+        both.apply(newer)
+        var merged = newer
+        merged.merge(older)
+        var once = UserModel()
+        once.apply(merged)
+        XCTAssertEqual(both, once)
+    }
 }

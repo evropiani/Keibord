@@ -40,6 +40,8 @@ final class KeyboardViewController: UIInputViewController {
     private var engineNeedsUserModel = false
     /// False while user-model.json is being loaded in the background (launch, or after the app changed it).
     private var userModelLoaded = false
+    /// Counts background loads, so a failed write can tell whether a load started after it was queued.
+    private var userModelLoadGeneration = 0
     /// Learning recorded while loading: applied on top of the loaded model, which does not contain it.
     private var preloadIncrements: [UserModelDelta] = []
     /// A word became "known" since the user lexicon was last built.
@@ -115,6 +117,10 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         fullAccess = hasFullAccess
+        // Before reloading: a settings change renders right away (controller delegate), which must not
+        // configure the emoji panel (loading the emoji catalog) the keyboard was dismissed in.
+        mode = .keys
+        fullAccessHintExpanded = false
         reloadIfChanged()
         purgeExpiredCards()
         cards = settings.cardSuggestions ? CardVault.shared.cards() : []
@@ -133,8 +139,6 @@ final class KeyboardViewController: UIInputViewController {
                 DispatchQueue.main.async { self?.engine.setSupplementaryLexicon(entries) }
             }
         }
-        mode = .keys
-        fullAccessHintExpanded = false
         controller.configure(field: FieldContextMapper.context(for: textDocumentProxy))
         if startsOnNumbersPage { controller.handle(.switchPage(.numbers)) }
         writeState()
@@ -232,15 +236,21 @@ final class KeyboardViewController: UIInputViewController {
     /// this took a few hundred milliseconds with a big model before the keyboard could first draw.
     private func loadUserModelInBackground() {
         userModelLoaded = false
+        userModelLoadGeneration += 1
         preloadIncrements = []
         let store = self.store
         flushQueue.async {
             let date = store.modificationDate(of: .userModel)
-            let model = store.loadUserModel()
+            // nil: the file exists but cannot be read right now. Start empty and forget the date, so the
+            // next appearance reads it again instead of typing without the learned words until the app
+            // changes the file.
+            let readable = store.loadUserModelIfReadable()
+            let model = readable ?? UserModel()
             let words = model.knownWords()
             let lexicon: InMemoryLexicon? = words.isEmpty ? nil : InMemoryLexicon(languageID: "user", entries: words)
+            let loadedDate = readable == nil ? nil : date
             DispatchQueue.main.async { [weak self] in
-                self?.didLoadUserModel(model, lexicon: lexicon, date: date)
+                self?.didLoadUserModel(model, lexicon: lexicon, date: loadedDate)
             }
         }
     }
@@ -315,25 +325,34 @@ final class KeyboardViewController: UIInputViewController {
         pendingDelta = UserModelDelta()
         pendingEvents = 0
         let store = self.store
+        let generation = userModelLoadGeneration
         if synchronously {
             flushQueue.sync {
-                let dates = writeLearning(delta, to: store)
-                DispatchQueue.main.async { [weak self] in self?.didFlush(before: dates.before, after: dates.after) }
+                let result = writeLearning(delta, to: store)
+                DispatchQueue.main.async { [weak self] in self?.didFlush(result, delta: delta, loadGeneration: generation) }
             }
         } else {
             flushQueue.async {
-                let dates = writeLearning(delta, to: store)
-                DispatchQueue.main.async { [weak self] in self?.didFlush(before: dates.before, after: dates.after) }
+                let result = writeLearning(delta, to: store)
+                DispatchQueue.main.async { [weak self] in self?.didFlush(result, delta: delta, loadGeneration: generation) }
             }
         }
         engineNeedsUserModel = true
         scheduleEngineRefresh()
     }
 
-    private func didFlush(before: Date?, after: Date?) {
+    private func didFlush(_ result: LearningWrite, delta: UserModelDelta, loadGeneration: Int) {
+        guard result.written else {
+            // Nothing reached the disk (file unreadable right now, no access): keep the increments for the
+            // next flush instead of dropping them. The in-memory model already has them, unless a load
+            // queued after this write replaces it: that load cannot contain them, so they go on top.
+            pendingDelta.merge(delta)
+            if !userModelLoaded, loadGeneration != userModelLoadGeneration { preloadIncrements.insert(delta, at: 0) }
+            return
+        }
         // Our own write: remember its date so the next appearance does not decode the file again. If the
         // app had changed the file in between, keep the old date so that change is loaded next time.
-        if before == userModelDate { userModelDate = after }
+        if result.before == userModelDate { userModelDate = result.after }
     }
 
     /// Refreshes the engine's view of the learned data once typing pauses for a moment, instead of in
@@ -713,12 +732,18 @@ final class KeyboardViewController: UIInputViewController {
     }
 }
 
-/// Applies a learning delta to user-model.json (runs on the flush queue) and returns the file's
-/// modification dates before and after the write.
-private func writeLearning(_ delta: UserModelDelta, to store: KeibordStore) -> (before: Date?, after: Date?) {
+/// Outcome of one learning write: user-model.json's modification dates around it, and whether it was written.
+private struct LearningWrite {
+    var before: Date?
+    var after: Date?
+    var written: Bool
+}
+
+/// Applies a learning delta to user-model.json (runs on the flush queue).
+private func writeLearning(_ delta: UserModelDelta, to store: KeibordStore) -> LearningWrite {
     let before = store.modificationDate(of: .userModel)
-    store.flush(delta)
-    return (before: before, after: store.modificationDate(of: .userModel))
+    let written = store.flush(delta)
+    return LearningWrite(before: before, after: store.modificationDate(of: .userModel), written: written)
 }
 
 // MARK: - Delegates

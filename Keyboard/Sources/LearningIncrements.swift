@@ -45,4 +45,40 @@ extension UserModelDelta {
         }
         return d
     }
+
+    /// Adds the increments of `older` (a delta whose write failed) to this one, so the next flush writes
+    /// both. Keeps this delta's own state: the autocorrected commit a backspace can still take back.
+    mutating func merge(_ older: UserModelDelta) {
+        for (word, w) in older.words {
+            guard var mine = words[word] else {
+                if w.count != 0 { words[word] = w }
+                continue
+            }
+            mine.count += w.count
+            mine.lastUsedDay = max(mine.lastUsedDay, w.lastUsedDay)
+            if mine.language == nil { mine.language = w.language }
+            words[word] = mine.count != 0 ? mine : nil
+        }
+        for (key, count) in older.bigrams {
+            let sum = (bigrams[key] ?? 0) + count
+            bigrams[key] = sum != 0 ? sum : nil
+        }
+        for (key, t) in older.touch {
+            var mine = touch[key] ?? TouchStat()
+            mine.sumDX += t.sumDX
+            mine.sumDY += t.sumDY
+            mine.count += t.count
+            touch[key] = mine
+        }
+        for (key, e) in older.emoji {
+            var mine = emoji[key] ?? EmojiStat(count: 0, lastUsed: e.lastUsed)
+            mine.count += e.count
+            mine.lastUsed = max(mine.lastUsed, e.lastUsed)
+            emoji[key] = mine
+        }
+        for (key, count) in older.languageUsage {
+            let sum = (languageUsage[key] ?? 0) + count
+            languageUsage[key] = sum != 0 ? sum : nil
+        }
+    }
 }

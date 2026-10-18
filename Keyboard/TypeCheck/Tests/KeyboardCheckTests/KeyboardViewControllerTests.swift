@@ -82,6 +82,12 @@ final class KeyboardViewControllerTests: XCTestCase {
         }
     }
     private func wait(_ seconds: TimeInterval) { RunLoop.current.run(until: Date().addingTimeInterval(seconds)) }
+    /// A write by the app, seconds after the keyboard's own (file times are coarse on Linux: two writes
+    /// within a few milliseconds can share one modification date, which made tests flaky).
+    private func markChangedByTheApp(_ file: KeibordFile) {
+        let later = Date().addingTimeInterval(2)
+        try? FileManager.default.setAttributes([.modificationDate: later], ofItemAtPath: KeibordStore.shared.url(file).path)
+    }
 
     // MARK: Typing
 
@@ -115,6 +121,7 @@ final class KeyboardViewControllerTests: XCTestCase {
         settings.appearance.showNumberRow = true
         settings.enabledLanguages = [.enGB]
         KeibordStore.shared.saveSettings(settings)
+        markChangedByTheApp(.settings)
         vc.viewWillAppear(false)
         XCTAssertEqual(keyboard.layout?.rows.count, 5)
         XCTAssertEqual(keyboard.layout?.language, .enGB, "a language that is no longer enabled is left")
@@ -248,6 +255,7 @@ final class KeyboardViewControllerTests: XCTestCase {
         vc.viewWillDisappear(false)
         // The app adds a word in its dictionary editor while the keyboard is away.
         KeibordStore.shared.updateUserModel { $0.addWord("neuwort") }
+        markChangedByTheApp(.userModel)
         type("oida ") // learned after the flush, still pending when the keyboard comes back
         vc.viewWillAppear(false)
         wait(0.3)
@@ -258,6 +266,55 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertNotNil(saved.words["neuwort"])
         XCTAssertNotNil(saved.words["Servus"] ?? saved.words["servus"])
         XCTAssertEqual(saved.words["oida"]?.count, 1)
+    }
+
+    /// Makes user-model.json unreadable (a directory in its place: root ignores file permissions).
+    private func blockUserModelFile() {
+        let url = KeibordStore.shared.url(.userModel)
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    func testLearningIsKeptWhenTheWriteFailsAndWrittenLater() {
+        start()
+        wait(0.3)
+        type("servus oida ")
+        blockUserModelFile()
+        vc.viewWillDisappear(false) // the write fails: the file cannot be read
+        wait(0.05)
+        try? FileManager.default.removeItem(at: KeibordStore.shared.url(.userModel))
+        vc.viewWillAppear(false)
+        wait(0.3)
+        vc.viewWillDisappear(false)
+        let saved = KeibordStore.shared.loadUserModel()
+        XCTAssertEqual(saved.words["oida"]?.count, 1, "the failed write's words reach the disk with the next one")
+        XCTAssertEqual(saved.languageUsage.values.reduce(0, +), 2, "counted once")
+    }
+
+    func testUnreadableModelIsReadAgainOnTheNextAppearance() {
+        // user-model.json is a symbolic link (its own modification date is what the keyboard sees) to a
+        // directory: unreadable. Later the target becomes a readable model, the link's date unchanged,
+        // like a file that could not be read for a moment (data protection, I/O error).
+        let url = KeibordStore.shared.url(.userModel)
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("keibord-model-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: url)
+        XCTAssertNoThrow(try FileManager.default.createSymbolicLink(at: url, withDestinationURL: target))
+        defer { try? FileManager.default.removeItem(at: target) }
+        let linkDate = KeibordStore.shared.modificationDate(of: .userModel)
+        XCTAssertNotNil(linkDate)
+        start()
+        wait(0.3)
+        vc.viewWillDisappear(false)
+        var model = UserModel()
+        model.words["leiwand"] = LearnedWord(count: 5, lastUsedDay: 20_000, language: "de-AT")
+        try? FileManager.default.removeItem(at: target)
+        XCTAssertNoThrow(try KeibordJSON.encoder().encode(model).write(to: target))
+        XCTAssertEqual(KeibordStore.shared.modificationDate(of: .userModel), linkDate)
+        vc.viewWillAppear(false)
+        wait(0.3)
+        type("leiw")
+        XCTAssertTrue(barTitles.contains { $0.lowercased() == "leiwand" }, "\(barTitles)")
     }
 
     // MARK: Suggestion bar
