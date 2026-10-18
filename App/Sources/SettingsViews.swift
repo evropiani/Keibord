@@ -91,6 +91,8 @@ struct LanguagesView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                    // At least one language must stay enabled: do not offer to delete the last one.
+                    .deleteDisabled(model.settings.enabledLanguages.count <= 1)
                 }
                 .onMove { from, to in model.settings.enabledLanguages.move(fromOffsets: from, toOffset: to) }
                 .onDelete { offsets in
@@ -321,7 +323,10 @@ struct TintedKeysView: View {
         case "language": return "Language"
         case "globe": return "Globe"
         case "dotcom": return ".com"
-        default: return id.uppercased()
+        default:
+            // "ß".uppercased() is "SS": only show the upper-case form when it is still one character.
+            let upper = id.uppercased()
+            return upper.count == id.count ? upper : id
         }
     }
 }

@@ -11,49 +11,18 @@ struct KeibordApp: App {
             RootView()
                 .environmentObject(model)
                 .onChange(of: scenePhase) { phase in
-                    if phase == .active { model.refresh() }
+                    switch phase {
+                    case .active:
+                        model.refresh()
+                    case .inactive, .background:
+                        // The keyboard reads the files when it appears: never leave edits unsaved.
+                        model.saveNow()
+                    @unknown default:
+                        break
+                    }
                 }
         }
     }
-}
-
-/// App-wide state backed by the shared store.
-final class AppModel: ObservableObject {
-    let store = KeibordStore.shared
-
-    @Published var settings: KeibordSettings { didSet { if settings != oldValue { store.saveSettings(settings) } } }
-    @Published var profile: PersonalProfile { didSet { if profile != oldValue { store.saveProfile(profile) } } }
-    @Published private(set) var userModel: UserModel
-    @Published private(set) var state: KeyboardRuntimeState
-    @Published private(set) var cards: [StoredCard]
-
-    init() {
-        settings = store.loadSettings()
-        profile = store.loadProfile()
-        userModel = store.loadUserModel()
-        state = store.loadState()
-        cards = CardVault.shared.cards()
-    }
-
-    func refresh() {
-        let s = store.loadSettings()
-        if s != settings { settings = s }
-        userModel = store.loadUserModel()
-        state = store.loadState()
-        cards = CardVault.shared.cards()
-    }
-
-    func editUserModel(_ transform: @escaping (inout UserModel) -> Void) {
-        store.updateUserModel(transform)
-        userModel = store.loadUserModel()
-    }
-
-    func replaceUserModel(_ model: UserModel) {
-        store.saveUserModel(model)
-        userModel = store.loadUserModel()
-    }
-
-    func reloadCards() { cards = CardVault.shared.cards() }
 }
 
 struct RootView: View {
