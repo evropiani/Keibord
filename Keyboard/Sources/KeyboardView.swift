@@ -116,6 +116,16 @@ final class KeyView: UIView {
     }
 }
 
+/// Touch timing of the key area.
+private enum KeyTiming {
+    /// Backspace: repeat starts after 0.5 s, then every 0.09 s; whole words after 1.6 s, at half that rate.
+    static let backspaceRepeatDelay: TimeInterval = 0.5
+    static let backspaceRepeatInterval: TimeInterval = 0.09
+    static let backspaceWordModeDelay: TimeInterval = 1.6
+    /// Space-bar trackpad: points of horizontal drag per character.
+    static let trackpadStep: CGFloat = 9
+}
+
 /// The key area: draws keys and turns touches into `KeyboardViewEvent`s.
 final class KeyboardView: UIView {
     weak var delegate: KeyboardViewDelegate?
@@ -172,12 +182,6 @@ final class KeyboardView: UIView {
     private var touchCounter = 0
     private var lastShiftTap: TimeInterval = 0
     private var trackpadActive = false
-
-    /// Backspace: repeat starts after 0.5 s, then every 0.09 s; whole words after 1.6 s, at half that rate.
-    private static let backspaceRepeatDelay: TimeInterval = 0.5
-    private static let backspaceRepeatInterval: TimeInterval = 0.09
-    private static let backspaceWordModeDelay: TimeInterval = 1.6
-    private static let trackpadStep: CGFloat = 9
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -422,16 +426,9 @@ final class KeyboardView: UIView {
             delegate?.keyboardView(self, didTrigger: .backspace)
             t.mode = .repeating
             let start = Date()
-            t.timer = Timer.scheduledTimer(withTimeInterval: Self.backspaceRepeatDelay, repeats: false) { [weak self, weak t] _ in
+            t.timer = Timer.scheduledTimer(withTimeInterval: KeyTiming.backspaceRepeatDelay, repeats: false) { [weak self, weak t] _ in
                 guard let self = self, let t = t else { return }
-                t.timer = Timer.scheduledTimer(withTimeInterval: Self.backspaceRepeatInterval, repeats: true) { [weak self, weak t] _ in
-                    guard let self = self, let t = t else { return }
-                    t.repeatTicks += 1
-                    let wordMode = Date().timeIntervalSince(start) > Self.backspaceWordModeDelay
-                    // Whole words go at half the rate (every 0.18 s), so the user can stop in time.
-                    if wordMode, t.repeatTicks % 2 != 0 { return }
-                    self.delegate?.keyboardView(self, didTrigger: .backspaceRepeat(wordMode: wordMode))
-                }
+                self.startBackspaceRepeat(t, start: start)
             }
         case .shift:
             let now = Date().timeIntervalSince1970
@@ -453,6 +450,18 @@ final class KeyboardView: UIView {
             if !keyAlternates(key).isEmpty { scheduleLongPress(t, delay: 0.42) }
         default:
             break
+        }
+    }
+
+    private func startBackspaceRepeat(_ t: Tracked, start: Date) {
+        guard t.mode == .repeating else { return }
+        t.timer = Timer.scheduledTimer(withTimeInterval: KeyTiming.backspaceRepeatInterval, repeats: true) { [weak self, weak t] _ in
+            guard let self = self, let t = t else { return }
+            t.repeatTicks += 1
+            let wordMode = Date().timeIntervalSince(start) > KeyTiming.backspaceWordModeDelay
+            // Whole words go at half the rate (every 0.18 s), so the user can stop in time.
+            if wordMode, t.repeatTicks % 2 != 0 { return }
+            self.delegate?.keyboardView(self, didTrigger: .backspaceRepeat(wordMode: wordMode))
         }
     }
 
@@ -505,7 +514,7 @@ final class KeyboardView: UIView {
             case .trackpad:
                 t.cursorRemainder += point.x - t.lastX
                 t.lastX = point.x
-                let step = Self.trackpadStep
+                let step = KeyTiming.trackpadStep
                 let n = Int(t.cursorRemainder / step)
                 if n != 0 {
                     t.cursorRemainder -= CGFloat(n) * step

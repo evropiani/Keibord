@@ -38,7 +38,8 @@ final class KeyboardViewController: UIInputViewController {
     private var engineNeedsUserModel = false
     /// A word became "known" since the user lexicon was last built.
     private var userLexiconDirty = false
-    private var engineRefreshWork: DispatchWorkItem?
+    private var engineRefreshToken = 0
+    private var engineRefreshPending = false
     private var lastSupplementaryRequest: Date?
     /// `hasFullAccess`, read once per appearance (it cannot change while the keyboard is shown).
     private var fullAccess = false
@@ -136,8 +137,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillDisappear(animated)
         // A held backspace must not keep deleting once the keyboard goes away.
         keyboardView.cancelAllTouches()
-        engineRefreshWork?.cancel()
-        engineRefreshWork = nil
+        cancelEngineRefresh()
         flushLearning(synchronously: true)
         releaseEmojiSearchData()
         purgeExpiredCards()
@@ -223,7 +223,11 @@ final class KeyboardViewController: UIInputViewController {
         pendingDelta.record(event)
         userModel.apply(single)
         if wasUnknown.contains(where: { (userModel.words[$0]?.count ?? 0) >= threshold }) {
+            // A newly known word (e.g. a rejected autocorrection) must stop being "corrected" soon, not
+            // only after the next 25 events: hand it to the engine at the next typing pause.
             userLexiconDirty = true
+            engineNeedsUserModel = true
+            scheduleEngineRefresh()
         }
         pendingEvents += 1
     }
@@ -239,16 +243,16 @@ final class KeyboardViewController: UIInputViewController {
         pendingDelta = UserModelDelta()
         pendingEvents = 0
         let store = self.store
-        let work = DispatchWorkItem { [weak self] in
-            let before = store.modificationDate(of: .userModel)
-            store.flush(delta)
-            let after = store.modificationDate(of: .userModel)
-            DispatchQueue.main.async { self?.didFlush(before: before, after: after) }
-        }
         if synchronously {
-            flushQueue.sync(execute: work)
+            flushQueue.sync {
+                let dates = writeLearning(delta, to: store)
+                DispatchQueue.main.async { [weak self] in self?.didFlush(before: dates.before, after: dates.after) }
+            }
         } else {
-            flushQueue.async(execute: work)
+            flushQueue.async {
+                let dates = writeLearning(delta, to: store)
+                DispatchQueue.main.async { [weak self] in self?.didFlush(before: dates.before, after: dates.after) }
+            }
         }
         engineNeedsUserModel = true
         scheduleEngineRefresh()
@@ -264,21 +268,28 @@ final class KeyboardViewController: UIInputViewController {
     /// the middle of a keystroke. Called again on every key press, which postpones it while typing.
     private func scheduleEngineRefresh() {
         guard engineNeedsUserModel else { return }
-        engineRefreshWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self = self else { return }
-            self.engineRefreshWork = nil
+        engineRefreshToken += 1
+        let token = engineRefreshToken
+        engineRefreshPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.engineRefreshDelay) { [weak self] in
+            // Superseded by a later key press (or cancelled by viewWillDisappear).
+            guard let self = self, self.engineRefreshToken == token else { return }
+            self.engineRefreshPending = false
             guard self.engineNeedsUserModel else { return }
             self.applyUserModelToEngine(rebuildLexicon: self.userLexiconDirty)
         }
-        engineRefreshWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.engineRefreshDelay, execute: work)
+    }
+
+    private func cancelEngineRefresh() {
+        engineRefreshToken += 1
+        engineRefreshPending = false
     }
 
     private func writeState() {
         let state = KeyboardRuntimeState(currentLanguage: controller.language, lastActive: Date(), hasFullAccess: fullAccess,
                                          keyboardVersion: KeibordVersion.display, appGroupIdentifier: AppGroup.resolvedIdentifier)
-        store.saveState(state)
+        let store = self.store
+        flushQueue.async { store.saveState(state) }
     }
 
     private var isDark: Bool {
@@ -612,6 +623,14 @@ final class KeyboardViewController: UIInputViewController {
     }
 }
 
+/// Applies a learning delta to user-model.json (runs on the flush queue) and returns the file's
+/// modification dates before and after the write.
+private func writeLearning(_ delta: UserModelDelta, to store: KeibordStore) -> (before: Date?, after: Date?) {
+    let before = store.modificationDate(of: .userModel)
+    store.flush(delta)
+    return (before: before, after: store.modificationDate(of: .userModel))
+}
+
 // MARK: - Delegates
 
 extension KeyboardViewController: InputControllerDelegate {
@@ -635,7 +654,7 @@ extension KeyboardViewController: LearningSink {
 
 extension KeyboardViewController: KeyboardViewDelegate {
     func keyboardView(_ view: KeyboardView, didTrigger event: KeyboardViewEvent) {
-        if case .keyDown = event, engineRefreshWork != nil {
+        if case .keyDown = event, engineRefreshPending {
             scheduleEngineRefresh() // still typing: postpone the engine refresh
         }
         if mode == .emojiSearch {
