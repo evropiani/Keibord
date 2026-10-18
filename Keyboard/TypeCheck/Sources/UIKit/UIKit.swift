@@ -216,7 +216,14 @@ open class NSLayoutConstraint: NSObject {
     open var isActive: Bool = false
 }
 open class NSLayoutDimension: NSObject {
-    open func constraint(equalToConstant c: CGFloat) -> NSLayoutConstraint { NSLayoutConstraint() }
+    /// Test-only: constraints created from this anchor.
+    public private(set) var testConstraints: [NSLayoutConstraint] = []
+    open func constraint(equalToConstant c: CGFloat) -> NSLayoutConstraint {
+        let constraint = NSLayoutConstraint()
+        constraint.constant = c
+        testConstraints.append(constraint)
+        return constraint
+    }
 }
 
 /// A minimal working view tree: frames, bounds (origin always zero), superview/subviews, point conversion
@@ -259,7 +266,8 @@ open class UIView: UIResponder {
     open var tintColor: UIColor!
     open var contentMode: UIView.ContentMode = .scaleToFill
     open var traitCollection: UITraitCollection { UITraitCollection() }
-    open var heightAnchor: NSLayoutDimension { NSLayoutDimension() }
+    private let heightDimension = NSLayoutDimension()
+    open var heightAnchor: NSLayoutDimension { heightDimension }
     open var gestureRecognizers: [UIGestureRecognizer]?
     open func addSubview(_ view: UIView) {
         view.removeFromSuperview()
@@ -363,11 +371,13 @@ open class UIControl: UIView {
 open class UIButton: UIControl {
     public enum ButtonType: Int { case custom, system, detailDisclosure, infoLight, infoDark, contactAdd, close }
     public convenience init(type buttonType: UIButton.ButtonType) { self.init(frame: .zero) }
-    open func setTitle(_ title: String?, for state: UIControl.State) {}
+    private var titles: [UInt: String] = [:]
+    private let label = UILabel()
+    open func setTitle(_ title: String?, for state: UIControl.State) { titles[state.rawValue] = title }
     open func setTitleColor(_ color: UIColor?, for state: UIControl.State) {}
     open func setImage(_ image: UIImage?, for state: UIControl.State) {}
-    open func title(for state: UIControl.State) -> String? { nil }
-    open var titleLabel: UILabel? { nil }
+    open func title(for state: UIControl.State) -> String? { titles[state.rawValue] }
+    open var titleLabel: UILabel? { label }
 }
 
 open class UIStackView: UIView {
@@ -456,7 +466,7 @@ public protocol UIViewControllerTransitionCoordinator: UIViewControllerTransitio
 }
 
 open class UIViewController: UIResponder {
-    open var view: UIView!
+    open var view: UIView! = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 300))
     open var traitCollection: UITraitCollection { UITraitCollection() }
     open func viewDidLoad() {}
     open func viewWillAppear(_ animated: Bool) {}
@@ -472,10 +482,15 @@ open class UIViewController: UIResponder {
 
 open class UIInputViewController: UIViewController {
     open var inputView: UIInputView?
-    open var textDocumentProxy: UITextDocumentProxy { fatalError() }
-    open var hasFullAccess: Bool { false }
-    open var needsInputModeSwitchKey: Bool { true }
-    open func advanceToNextInputMode() {}
+    /// Test-only stand-ins for the host's text field and the system state.
+    public var testProxy: UITextDocumentProxy?
+    public var testHasFullAccess = false
+    public var testNeedsInputModeSwitchKey = true
+    open var textDocumentProxy: UITextDocumentProxy { testProxy! }
+    open var hasFullAccess: Bool { testHasFullAccess }
+    open var needsInputModeSwitchKey: Bool { testNeedsInputModeSwitchKey }
+    public private(set) var testAdvanceCount = 0
+    open func advanceToNextInputMode() { testAdvanceCount += 1 }
     open func handleInputModeList(from view: UIView, with event: UIEvent) {}
     open func requestSupplementaryLexicon(completion completionHandler: @escaping (UILexicon) -> Void) {}
     open func textWillChange(_ textInput: UITextInput?) {}

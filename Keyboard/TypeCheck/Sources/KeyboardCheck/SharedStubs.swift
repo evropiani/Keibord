@@ -55,6 +55,18 @@ enum CardVaultError: LocalizedError {
 
 final class CardVault {
     static let shared = CardVault()
-    func cards() -> [StoredCard] { [] }
-    func unlock(id: UUID, cvv: String?) throws -> UnlockedCard { throw CardVaultError.notFound }
+    /// Test-only: stored cards, their numbers and security codes.
+    var testCards: [StoredCard] = []
+    var testNumbers: [UUID: String] = [:]
+    var testCVVs: [UUID: String] = [:]
+    private(set) var testUnlockCount = 0
+
+    func cards() -> [StoredCard] { testCards }
+
+    func unlock(id: UUID, cvv: String?) throws -> UnlockedCard {
+        testUnlockCount += 1
+        guard let card = testCards.first(where: { $0.id == id }), let number = testNumbers[id] else { throw CardVaultError.notFound }
+        if card.requiresCVV, cvv != testCVVs[id] { throw CardVaultError.wrongCVV }
+        return UnlockedCard(card: card, number: number, cvv: cvv)
+    }
 }

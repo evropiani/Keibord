@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -41,7 +42,10 @@ def main():
     generate()
     command = "test" if "--test" in sys.argv else "build"
     scratch = os.environ.get("KEYBOARD_CHECK_SCRATCH", os.path.join(HERE, ".build"))
-    sys.exit(subprocess.call(["swift", command, "--package-path", HERE, "--scratch-path", scratch]))
+    env = dict(os.environ)
+    # KeibordStore falls back to Application Support (no app group on Linux): keep test files out of $HOME.
+    env["XDG_DATA_HOME"] = tempfile.mkdtemp(prefix="keyboard-check-")
+    sys.exit(subprocess.call(["swift", command, "--package-path", HERE, "--scratch-path", scratch], env=env))
 
 
 if __name__ == "__main__":
