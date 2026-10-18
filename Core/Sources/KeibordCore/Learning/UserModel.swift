@@ -17,6 +17,16 @@ public struct LearnedWord: Codable, Equatable, Sendable {
         self.language = language
         self.addedManually = addedManually
     }
+
+    private enum CodingKeys: String, CodingKey { case count, lastUsedDay, language, addedManually }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = UserModel.clampedCount(c.value(.count, default: 1))
+        lastUsedDay = c.value(.lastUsedDay, default: 0)
+        language = c.optionalValue(.language, as: String.self)
+        addedManually = c.value(.addedManually, default: false)
+    }
 }
 
 /// Accumulated touch offsets for one key in one layout geometry (normalised by key size).
@@ -33,6 +43,19 @@ public struct TouchStat: Codable, Equatable, Sendable {
 
     public var meanDX: Double { count > 0 ? sumDX / Double(count) : 0 }
     public var meanDY: Double { count > 0 ? sumDY / Double(count) : 0 }
+
+    private enum CodingKeys: String, CodingKey { case sumDX, sumDY, count }
+
+    /// Every recorded offset lies within ±1 key size, so the sums are clamped to ±count: a damaged or
+    /// hand-made file can neither distort the mean beyond that nor make later sums overflow to
+    /// infinity (which JSON cannot encode, so the model could never be saved again).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = UserModel.clampedCount(c.value(.count, default: 0))
+        let limit = Double(count)
+        sumDX = AppearanceSettings.clamp(c.value(.sumDX, default: 0), -limit...limit, default: 0)
+        sumDY = AppearanceSettings.clamp(c.value(.sumDY, default: 0), -limit...limit, default: 0)
+    }
 }
 
 public struct EmojiStat: Codable, Equatable, Sendable {
@@ -43,6 +66,14 @@ public struct EmojiStat: Codable, Equatable, Sendable {
     public init(count: Int, lastUsed: Double) {
         self.count = count
         self.lastUsed = lastUsed
+    }
+
+    private enum CodingKeys: String, CodingKey { case count, lastUsed }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = UserModel.clampedCount(c.value(.count, default: 1))
+        lastUsed = c.value(.lastUsed, default: 0)
     }
 }
 
@@ -70,7 +101,7 @@ public struct UserModel: Codable, Equatable, Sendable {
     public init() {}
 
     public static func bigramKey(_ previous: String, _ next: String) -> String {
-        TextUnits.lookupKey(previous) + String(bigramSeparator) + TextUnits.lookupKey(next)
+        LexiconKey.string(previous) + String(bigramSeparator) + LexiconKey.string(next)
     }
 
     public static func touchKey(layout: String, keyID: String) -> String {
@@ -82,11 +113,25 @@ public struct UserModel: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = c.value(.version, default: 1)
-        words = c.value(.words, default: [:])
-        bigrams = c.value(.bigrams, default: [:])
-        blocked = c.value(.blocked, default: [])
-        touch = c.value(.touch, default: [:])
-        emoji = c.value(.emoji, default: [:])
-        languageUsage = c.value(.languageUsage, default: [:])
+        // Entry by entry: one damaged entry must not wipe everything learned (the next save would
+        // make the loss permanent).
+        // Counts are clamped (see `maxCount`); word pairs that were never seen are dropped.
+        words = c.lossyDictionary(.words, default: [:])
+        bigrams = c.lossyDictionary(.bigrams, default: [:])
+        if bigrams.values.contains(where: { $0 <= 0 || $0 > UserModel.maxCount }) {
+            bigrams = bigrams.filter { $0.value > 0 }.mapValues(UserModel.clampedCount)
+        }
+        blocked = Set(c.lossyArray(.blocked, default: [String]()))
+        touch = c.lossyDictionary(.touch, default: [:])
+        emoji = c.lossyDictionary(.emoji, default: [:])
+        languageUsage = c.lossyDictionary(.languageUsage, default: [String: Int]()).mapValues(UserModel.clampedCount)
+    }
+
+    /// Upper bound for every stored count: far beyond real use, and small enough that adding counts
+    /// (applying deltas, merging imports, summing casings) can never overflow, which would crash.
+    static let maxCount = 1_000_000_000
+
+    static func clampedCount(_ value: Int) -> Int {
+        min(max(0, value), maxCount)
     }
 }
