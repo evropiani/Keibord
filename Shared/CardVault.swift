@@ -225,11 +225,24 @@ final class CardVault {
         return card
     }
 
-    /// Replaces the stored card with the same id (a deleted card is not brought back).
-    func update(_ card: StoredCard) {
-        modify { cards in
-            if let i = cards.firstIndex(where: { $0.id == card.id }) { cards[i] = card }
+    /// Saves the editable details (nickname, holder, expiry) of the stored card with the same id. The
+    /// sealed number, salt, CVV requirement and failed-attempt counter always come from the file: a
+    /// stale copy must neither reset a lockout the keyboard just counted nor replace the key material.
+    /// A deleted card is not brought back. Returns false when nothing could be saved.
+    @discardableResult
+    func update(_ card: StoredCard) -> Bool {
+        var found = false
+        let saved = modify { cards in
+            guard let i = cards.firstIndex(where: { $0.id == card.id }) else { return }
+            found = true
+            cards[i].nickname = card.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+            cards[i].holderName = card.holderName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if (1...12).contains(card.expMonth), card.expYear >= 0 {
+                cards[i].expMonth = card.expMonth
+                cards[i].expYear = card.expYear < 100 ? 2000 + card.expYear : card.expYear
+            }
         }
+        return saved != nil && found
     }
 
     func delete(id: UUID) {
@@ -250,7 +263,11 @@ final class CardVault {
             guard let number = decryptNumber(card, using: symmetric) else { throw CardVaultError.cryptoFailure }
             return UnlockedCard(card: card, number: number, cvv: nil)
         }
-        let symmetric = try key(salt: card.salt, cvv: cvv?.filter({ $0.isNumber }) ?? "", create: false)
+        // Exactly the digits `add` used to derive the key (ASCII only). No card was ever saved with a
+        // code shorter than 3 digits, so such an input is refused without costing an attempt.
+        let code = CardBrand.digits(in: cvv ?? "")
+        guard code.count >= 3 else { throw CardVaultError.wrongCVV }
+        let symmetric = try key(salt: card.salt, cvv: code, create: false)
         // Count the attempt before trying it: the keyboard process can be killed at any moment, and a guess
         // that was never counted would make the lockout useless. If the counter cannot be stored, do not try.
         var counted: StoredCard?
@@ -270,6 +287,6 @@ final class CardVault {
             if let i = cards.firstIndex(where: { $0.id == id }) { cards[i].failedAttempts = 0 }
         }
         attempt.failedAttempts = 0
-        return UnlockedCard(card: attempt, number: number, cvv: cvv)
+        return UnlockedCard(card: attempt, number: number, cvv: code)
     }
 }

@@ -33,6 +33,9 @@ enum DeviceSecret {
         // errSecSuccess here means an item exists but is not a valid secret; errSecInteractionNotAllowed
         // means the keychain is locked right now. Neither is "no secret yet".
         guard keychain.status != errSecSuccess, keychain.status != errSecInteractionNotAllowed else { return nil }
+        // Likewise a fallback file that exists but cannot be read (data protection, I/O error): a new
+        // secret in the keychain would win over it from now on and orphan every card sealed with it.
+        guard !FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
 
         var bytes = [UInt8](repeating: 0, count: length)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { return nil }
@@ -50,10 +53,20 @@ enum DeviceSecret {
         // shared directory, but never replace a file that appeared in the meantime.
         do {
             try secret.write(to: fileURL, options: [.withoutOverwriting, .completeFileProtectionUntilFirstUserAuthentication])
+            excludeFromBackup(fileURL)
             return secret
         } catch {
             return readFile(fileURL)
         }
+    }
+
+    /// Like the keychain item (`…ThisDeviceOnly`), the fallback key must not travel with device backups:
+    /// together with cards.json it would decrypt every card that does not require the CVV.
+    private static func excludeFromBackup(_ url: URL) {
+        var fileURL = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? fileURL.setResourceValues(values)
     }
 
     private static func readKeychain() -> (status: OSStatus, data: Data?) {
