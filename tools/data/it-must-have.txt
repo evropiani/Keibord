@@ -1,0 +1,212 @@
+# Must-have words for Resources/Dictionaries/it.kbdl, checked by
+# `python3 tools/build_dictionaries.py --verify` (and tools/test_kbdl.py on the committed files).
+#
+# Every word must be in the dictionary with exactly this casing AND be the most frequent casing of
+# its key. A trailing number is the minimum zipf (default 2.0: an everyday word must not look rare).
+# "!word" must NOT be in the dictionary (accent-less spellings the keyboard should correct).
+
+# Accented words
+perché 6
+città 4.5
+più 6
+già 5.5
+così 6
+caffè 4
+però 5
+là 5
+lì 5
+né 4.5
+è 7
+sì 6
+può 5.5
+cioè 4.5
+ciò 5
+papà 5
+venerdì 4
+lunedì 4
+martedì 3.5
+mercoledì 3.5
+giovedì 3.5
+sabato 4
+domenica 4
+tè 3
+farò 4.5
+sarà 5.5
+potrà 4.5
+dovrà 4
+università 4
+età 4
+verità 5
+libertà 4.5
+qualità 4
+attività 4
+società 4.5
+
+# Function words, pronouns
+io 6
+tu 6
+lui 6
+lei 6
+noi 5.5
+voi 5.5
+loro 5.5
+mi 6.5
+ti 6
+ci 6
+si 6.5
+il 7
+la 7
+lo 6.5
+gli 6
+le 6.5
+un 7
+una 6.5
+di 7
+da 6
+in 6.5
+con 6
+su 5.5
+per 6.5
+tra 5
+fra 4.5
+e 7
+o 5.5
+ma 6.5
+non 7
+che 7
+se 6
+come 6
+quando 6
+dove 5.5
+chi 6
+cosa 6.5
+quanto 5
+anche 6
+ancora 5.5
+sempre 5.5
+mai 6
+già 5.5
+molto 6
+poco 5
+tutto 6
+niente 5.5
+qualcosa 5.5
+qui 6
+ora 6
+adesso 5.5
+oggi 5
+domani 5
+ieri 4.5
+dopo 5.5
+prima 5.5
+grazie 6
+prego 5
+ciao 5.5
+buongiorno 4.5
+buonasera 4
+scusa 5
+scusi 4.5
+favore 5
+sì 6
+no 6.5
+bene 6
+male 5
+d'accordo 3
+
+# Verbs
+essere 6
+avere 5.5
+fare 6
+andare 5.5
+venire 5
+dire 5.5
+vedere 5.5
+sapere 5
+volere 4.5
+potere 4.5
+dovere 4.5
+mangiare 5
+bere 4.5
+dormire 4.5
+lavorare 4.5
+parlare 5.5
+capire 5
+pensare 5
+sono 6.5
+sei 6
+siamo 5.5
+ho 6.5
+hai 6
+ha 6.5
+abbiamo 5.5
+hanno 5.5
+era 6
+voglio 6
+posso 6
+devo 5.5
+vado 5
+andiamo 5.5
+capito 5
+
+# Nouns
+casa 6
+lavoro 5.5
+tempo 5.5
+giorno 5.5
+notte 5.5
+sera 5
+mattina 5
+settimana 5
+anno 5
+anni 5.5
+mese 4.5
+ora 6
+amico 5.5
+amica 5
+amore 5.5
+famiglia 5.5
+madre 5.5
+padre 5.5
+mamma 5.5
+figlio 5.5
+figlia 5
+fratello 5
+sorella 5
+ragazzo 5
+ragazza 5
+uomo 5.5
+donna 5.5
+bambino 5
+gente 5.5
+persone 5.5
+soldi 5.5
+macchina 5
+telefono 5
+acqua 5
+pane 4
+vino 4.5
+pizza 4.5
+cena 5
+pranzo 4.5
+colazione 4.5
+scuola 5
+strada 5
+vita 6
+problema 5.5
+idea 5.5
+Roma 4.5
+Milano 4
+Italia 4.5
+Napoli 4
+Dio 5
+
+# Accent-less spellings that must be corrected, not kept
+!perche
+!citta
+!piu
+!gia
+!cosi
+!caffe
+!pero
+!poiche
+!pò
