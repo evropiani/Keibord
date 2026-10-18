@@ -151,6 +151,8 @@ final class KeyboardView: UIView {
     private var laidOutWidth: CGFloat = 0
 
     private let popup = KeyPopupView()
+    /// Frame index of the key the preview balloon was last shown for.
+    private var popupIndex: Int?
     private let callout = CalloutView()
     private var globeControl: UIControl?
     private var globeIndex: Int?
@@ -596,7 +598,9 @@ final class KeyboardView: UIView {
         t.timer?.invalidate()
         t.timer = nil
         let key = t.key
-        popup.isHidden = true
+        // Only this touch's own preview: releasing shift before the letter it capitalises must not hide
+        // the letter's preview while that key is still held.
+        if popupIndex == t.frameIndex { popup.isHidden = true }
         switch t.mode {
         case .trackpad:
             trackpadActive = false
@@ -645,6 +649,7 @@ final class KeyboardView: UIView {
     private func showPopup(for index: Int) {
         guard let theme = theme, frames.indices.contains(index), showsPopup(for: frames[index].key) else { popup.isHidden = true; return }
         let key = frames[index].key
+        popupIndex = index
         popup.show(text: displayLabel(key, theme: theme), keyRect: frames[index].rect, in: bounds, minY: visibleTop, theme: theme)
         bringSubviewToFront(popup)
     }

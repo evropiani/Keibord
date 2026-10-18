@@ -283,6 +283,20 @@ final class KeyboardViewTouchTests: XCTestCase {
         }
     }
 
+    func testReleasingShiftKeepsThePreviewOfTheHeldLetter() {
+        setUpKeyboard(request())
+        let popup = { self.keyboard.subviews.compactMap { $0 as? KeyPopupView }.first }
+        let shift = touch(at: point("shift")), h = touch(at: point("h"))
+        down(shift)
+        down(h)
+        XCTAssertEqual(popup()?.isHidden, false)
+        up(shift) // shift goes up first, the letter is still held
+        XCTAssertEqual(popup()?.isHidden, false, "the held letter keeps its preview")
+        up(h)
+        XCTAssertEqual(popup()?.isHidden, true)
+        XCTAssertEqual(recorder.actions, ["shift", "char:h"])
+    }
+
     func testAccentMenuOnTheRightEdgeStaysInsideTheKeyboard() {
         setUpKeyboard(request())
         let t = touch(at: point("o"))
