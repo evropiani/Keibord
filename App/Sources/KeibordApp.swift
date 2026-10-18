@@ -63,7 +63,8 @@ struct HomeView: View {
 
             Section("Status") {
                 StatusRow(title: "Keyboard enabled", ok: keyboardSeen,
-                          detail: keyboardSeen ? "Last used \(model.state.lastActive!.formatted(date: .abbreviated, time: .shortened))" : "Not used yet")
+                          detail: model.state.lastActive.map { "Last used \($0.formatted(date: .abbreviated, time: .shortened))" }
+                            ?? "Not used yet (without Full Access the keyboard cannot report here)")
                 StatusRow(title: "Full Access", ok: model.state.hasFullAccess,
                           detail: model.state.hasFullAccess ? "Learning, sync with this app and haptics work" : "Needed for learning, settings sync, cards and haptics")
                 StatusRow(title: "Shared storage", ok: model.store.isShared,

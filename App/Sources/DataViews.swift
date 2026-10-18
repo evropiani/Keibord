@@ -282,7 +282,9 @@ struct CardsView: View {
                     }
                 }
                 .onDelete { offsets in
-                    for i in offsets { CardVault.shared.delete(id: model.cards[i].id) }
+                    // Resolve the ids first (and only for valid rows); deletion is by id.
+                    let ids = offsets.filter { $0 < model.cards.count }.map { model.cards[$0].id }
+                    for id in ids { CardVault.shared.delete(id: id) }
                     model.reloadCards()
                 }
             } footer: {
