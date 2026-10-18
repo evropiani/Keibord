@@ -204,3 +204,6 @@ sti
 rhe
 glu
 job
+
+# "un po'": the corpus mostly lost the apostrophe; "po" alone is no Italian word (the river is "Po")
+po po'
