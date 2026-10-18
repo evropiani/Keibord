@@ -1,0 +1,210 @@
+# Must-have words for Resources/Dictionaries/sq.kbdl (Albanian, Kosovo and Albania), checked by
+# `python3 tools/build_dictionaries.py --verify` (and tools/test_kbdl.py on the committed files).
+#
+# Every word must be in the dictionary with exactly this casing AND be the most frequent casing of
+# its key. A trailing number is the minimum zipf (default 2.0: an everyday word must not look rare).
+# "!word" must NOT be in the dictionary (misspellings the keyboard should correct).
+
+# Function words, pronouns
+unë 6
+ti 6
+ai 6
+ajo 6
+ne 5.5
+ju 6
+ata 5.5
+ato 5
+mua 5.5
+ty 5.5
+të 7
+në 7
+një 6.5
+është 6.5
+që 6.5
+për 6.5
+dhe 6.5
+me 6.5
+nga 6
+se 6
+si 6
+por 6
+edhe 5.5
+nuk 6.5
+jo 6
+po 6.5
+mos 6
+ku 5.5
+kur 5.5
+pse 5.5
+çfarë 6
+kush 5.5
+sa 5.5
+këtu 5.5
+atje 5
+tani 5.5
+sot 5
+nesër 4.5
+dje 4
+gjithmonë 4.5
+kurrë 5
+shumë 6
+pak 5.5
+mirë 6
+keq 5
+vetëm 5.5
+gjithçka 5
+diçka 5
+asgjë 5
+ndonjë 5
+çdo 5
+këtë 6
+kjo 6
+ky 5.5
+atë 5.5
+këto 5
+
+# Greetings, politeness
+faleminderit 5
+përshëndetje 4
+mirëdita 3.5
+mirëmëngjes 3.5
+mirëmbrëma 3
+natën 4.5
+lutem 5
+falni 4.5
+tungjatjeta 3
+mirupafshim 3.5
+ok 4.5
+
+# Verbs
+jam 6
+je 6
+janë 6
+jemi 5.5
+jeni 5
+kam 6
+ke 6
+ka 6.5
+kemi 5.5
+keni 5
+kanë 5.5
+ishte 5.5
+dua 5.5
+do 6.5
+mund 6
+duhet 6
+shko 4.5
+shkoj 4.5
+vij 4.5
+vjen 5
+bëj 5
+bën 5
+them 5
+thotë 5
+di 5.5
+mendoj 5
+flas 4.5
+punoj 4
+ha 4
+pi 4
+fle 4
+shoh 4.5
+dëgjo 4.5
+prit 4.5
+eja 5
+hajde 4.5
+dashur 4.5
+kupton 4.5
+
+# Nouns
+shtëpi 4.5
+shtëpia 4.5
+shtëpinë 4
+punë 5
+puna 4.5
+kohë 5
+koha 4.5
+ditë 5
+dita 4.5
+natë 4.5
+nata 4.5
+javë 4.5
+vit 4.5
+vjet 4.5
+muaj 4.5
+orë 4.5
+para 5
+paratë 4.5
+njeri 5
+njerëz 5
+njerëzit 4.5
+burrë 4.5
+grua 4.5
+fëmijë 4.5
+fëmijët 4.5
+nënë 4.5
+nëna 4.5
+baba 4.5
+babai 4.5
+vëlla 4.5
+vëllai 4.5
+motër 4
+motra 4
+shok 4.5
+shoku 4.5
+shoqe 4
+familje 4.5
+familja 4.5
+dashuri 4.5
+zemër 4.5
+jetë 5
+jeta 4.5
+qytet 4
+qyteti 4
+fshat 3.5
+rrugë 4.5
+rruga 4
+makinë 4
+makina 4
+telefon 4
+shkollë 4
+shkolla 4
+ujë 4.5
+bukë 4
+kafe 4
+çaj 3.5
+mish 3.5
+djalë 4.5
+vajzë 4.5
+gjuhë 4
+shqip 4
+
+# Places
+Kosovë 3.5
+Kosova 3.5
+Prishtinë 3.5
+Prishtina 3
+Shqipëri 3.5
+Shqipëria 3.5
+Tiranë 3.5
+Prizren 3
+Pejë 3
+Gjakovë 3
+Mitrovicë 3
+Gjermani 3.5
+Zvicër 3.5
+Evropë 3.5
+
+# Misspellings that must be corrected, not kept
+!eshte
+!cfare
+!nje
+!mire
+!shume
+!falemnderit
+!faleminderti
+!pershendetje
+!gjithcka
+!shtepi
+!kosove
+!prishtine
