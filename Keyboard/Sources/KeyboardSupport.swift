@@ -90,6 +90,22 @@ final class ProxyDocument: TextDocumentProxyLike {
     func adjustTextPosition(byCharacterOffset offset: Int) { proxy.adjustTextPosition(byCharacterOffset: offset) }
 }
 
+/// The text around the cursor as the input controller last saw it (to tell the host's echo of the
+/// keyboard's own edits in `textDidChange` from real outside changes).
+struct DocumentSnapshot: Equatable {
+    var document: UUID
+    var before: String?
+    var after: String?
+    var selected: String?
+
+    init(_ proxy: UITextDocumentProxy) {
+        document = proxy.documentIdentifier
+        before = proxy.documentContextBeforeInput
+        after = proxy.documentContextAfterInput
+        selected = proxy.selectedText
+    }
+}
+
 /// Maps the focused field's traits to a `FieldContext`.
 enum FieldContextMapper {
     static func context(for proxy: UITextDocumentProxy) -> FieldContext {

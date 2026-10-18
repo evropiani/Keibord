@@ -133,6 +133,8 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private let variantStack = UIStackView()
     private var theme: KeyboardTheme?
     private var languageCode = "en"
+    /// Backspace held down: deletes again after 0.5 s, then every 0.09 s (like the key area).
+    private var backspaceTimer: Timer?
 
     override init(frame: CGRect) {
         let flow = UICollectionViewFlowLayout()
@@ -174,6 +176,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(catalog: EmojiCatalog?, recents: [String], theme: KeyboardTheme, languageCode: String) {
+        stopBackspaceRepeat() // the bottom bar (and a held backspace button) is rebuilt below
         self.catalog = catalog
         self.theme = theme
         self.languageCode = languageCode
@@ -214,7 +217,9 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         let back = UIButton(type: .system)
         back.setImage(UIImage(systemName: "delete.left"), for: .normal)
         back.tintColor = theme.colors.label.uiColor
-        back.addTarget(self, action: #selector(backTapped), for: .touchUpInside)
+        // Deletes on touch-down and repeats while held, like the backspace key of the letters.
+        back.addTarget(self, action: #selector(backDown), for: .touchDown)
+        back.addTarget(self, action: #selector(backUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
         bottomBar.addArrangedSubview(back)
         variantStack.backgroundColor = theme.colors.characterKey.uiColor
         updateCategoryHighlight()
@@ -223,6 +228,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     /// Frees the catalog (and the keyword tables it loaded for searching) while the panel is hidden;
     /// `configure` is called again before it is shown.
     func releaseData() {
+        stopBackspaceRepeat()
         catalog = nil
         sections = []
         variantStack.isHidden = true
@@ -283,7 +289,27 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     }
 
     @objc private func abcTapped() { delegate?.emojiPanelDidTapABC(self) }
-    @objc private func backTapped() { delegate?.emojiPanelDidTapBackspace(self) }
+    @objc private func backDown() {
+        stopBackspaceRepeat()
+        delegate?.emojiPanelDidTapBackspace(self)
+        backspaceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            self.backspaceTimer = Timer.scheduledTimer(withTimeInterval: 0.09, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                // Stop once the panel was closed (ABC) or the keyboard went away.
+                guard self.window != nil, !self.isHidden else { self.stopBackspaceRepeat(); return }
+                self.delegate?.emojiPanelDidTapBackspace(self)
+            }
+        }
+    }
+
+    @objc private func backUp() { stopBackspaceRepeat() }
+
+    func stopBackspaceRepeat() {
+        backspaceTimer?.invalidate()
+        backspaceTimer = nil
+    }
+
     @objc private func searchTapped() { delegate?.emojiPanelDidRequestSearch(self) }
 
     @objc private func longPressed(_ g: UILongPressGestureRecognizer) {

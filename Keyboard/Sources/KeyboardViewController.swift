@@ -24,6 +24,8 @@ final class KeyboardViewController: UIInputViewController {
 
     private enum Mode: Equatable { case keys, emoji, emojiSearch, cardUnlock(UUID) }
     private var mode: Mode = .keys
+    /// Page of the key area while typing an emoji search (the document's page stays untouched).
+    private var searchPage: LayoutPage = .letters
 
     private var pendingDelta = UserModelDelta()
     private var pendingEvents = 0
@@ -44,6 +46,10 @@ final class KeyboardViewController: UIInputViewController {
     /// `hasFullAccess`, read once per appearance (it cannot change while the keyboard is shown).
     private var fullAccess = false
     private var fullAccessHintExpanded = false
+    /// The document as of the controller's last update (see `textDidChange`).
+    private var documentSnapshot: DocumentSnapshot?
+    /// Whether the last render included the globe key (`needsInputModeSwitchKey`).
+    private var renderedGlobeKey: Bool?
 
     private var emojiCatalog: EmojiCatalog?
     private var emojiCatalogLoaded = false
@@ -128,15 +134,24 @@ final class KeyboardViewController: UIInputViewController {
         mode = .keys
         fullAccessHintExpanded = false
         controller.configure(field: FieldContextMapper.context(for: textDocumentProxy))
+        if startsOnNumbersPage { controller.handle(.switchPage(.numbers)) }
         writeState()
         render()
         scheduleEngineRefresh()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // The keyboard window's system edge gestures delay touchesBegan for keys at the screen edges
+        // (q, a, p, shift, backspace…), which made those keys lag and break rollover order.
+        view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         // A held backspace must not keep deleting once the keyboard goes away.
         keyboardView.cancelAllTouches()
+        if emojiPanelAdded { emojiPanel.stopBackspaceRepeat() }
         cancelEngineRefresh()
         flushLearning(synchronously: true)
         releaseEmojiSearchData()
@@ -147,6 +162,13 @@ final class KeyboardViewController: UIInputViewController {
         super.didReceiveMemoryWarning()
         layoutCache.removeAll()
         if mode != .emoji, mode != .emojiSearch { releaseEmojiSearchData(force: true) }
+    }
+
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        // `needsInputModeSwitchKey` can change after viewWillAppear (Apple's template checks it here):
+        // add or remove the globe key then, not only at the next keystroke.
+        if controller != nil, renderedGlobeKey != nil, renderedGlobeKey != needsInputModeSwitchKey { render() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -168,8 +190,14 @@ final class KeyboardViewController: UIInputViewController {
         super.textDidChange(textInput)
         guard controller != nil else { return }
         let field = FieldContextMapper.context(for: textDocumentProxy)
-        if field != controller.field { controller.configure(field: field) }
-        controller.documentDidChange()
+        if field != controller.field {
+            controller.configure(field: field) // re-syncs the document too
+            if startsOnNumbersPage { controller.handle(.switchPage(.numbers)) }
+        } else if DocumentSnapshot(textDocumentProxy) != documentSnapshot {
+            // Many hosts call textDidChange after each of the keyboard's own edits too: suggestions are
+            // only recomputed when the text around the cursor is not what the controller last saw.
+            controller.documentDidChange()
+        }
     }
 
     // MARK: Data
@@ -215,19 +243,24 @@ final class KeyboardViewController: UIInputViewController {
 
     /// Records a learning event in the pending delta and the in-memory model.
     private func noteLearning(_ event: LearningEvent) {
-        var single = UserModelDelta()
-        single.record(event)
-        guard !single.isEmpty else { return }
-        let threshold = LearningPolicy.knownThreshold
-        let wasUnknown = single.words.keys.filter { (userModel.words[$0]?.count ?? 0) < threshold }
+        let before = pendingDelta
         pendingDelta.record(event)
-        userModel.apply(single)
+        // Exactly what the pending delta gained (a rejected autocorrection also takes back what its
+        // commit learned), so the in-memory model matches what the next flush writes to disk.
+        let increments = pendingDelta.increments(since: before)
+        guard !increments.isEmpty else { return }
+        let threshold = LearningPolicy.knownThreshold
+        let wasUnknown = increments.words.keys.filter { (userModel.words[$0]?.count ?? 0) < threshold }
+        userModel.apply(increments)
         if wasUnknown.contains(where: { (userModel.words[$0]?.count ?? 0) >= threshold }) {
-            // A newly known word (e.g. a rejected autocorrection) must stop being "corrected" soon, not
-            // only after the next 25 events: hand it to the engine at the next typing pause.
             userLexiconDirty = true
-            engineNeedsUserModel = true
-            scheduleEngineRefresh()
+            if case .rejectedCorrection = event {
+                // A rejected autocorrection must stop being "corrected" soon, not only after the next
+                // 25 events: hand it to the engine at the next typing pause. Other newly known words
+                // wait for the next flush (rebuilding the user lexicon costs tens of milliseconds).
+                engineNeedsUserModel = true
+                scheduleEngineRefresh()
+            }
         }
         pendingEvents += 1
     }
@@ -303,6 +336,10 @@ final class KeyboardViewController: UIInputViewController {
 
     private var isLandscape: Bool { traitCollection.verticalSizeClass == .compact }
 
+    /// Fields for numbers and punctuation (house numbers, times, IP addresses) open on the "123" page,
+    /// as with the system keyboard.
+    private var startsOnNumbersPage: Bool { (textDocumentProxy.keyboardType ?? .default) == .numbersAndPunctuation }
+
     // MARK: Rendering
 
     private func currentTheme() -> KeyboardTheme {
@@ -348,16 +385,19 @@ final class KeyboardViewController: UIInputViewController {
         let field = controller.field
         let searching = mode == .emojiSearch
         let numberRow = settings.appearance.showNumberRow && !searching
+        let globeKey = needsInputModeSwitchKey
+        renderedGlobeKey = globeKey
         // The emoji panel and the CVV pad take the height of the letter keys they replace.
         let request = LayoutRequest(
             language: controller.language,
             base: settings.baseLayout(for: controller.language),
-            page: searching ? .letters : controller.page,
+            page: searching ? searchPage : controller.page,
             variant: searching ? .standard : field.layoutVariant,
             showNumberRow: numberRow && controller.page == .letters,
             showLanguageKey: settings.activeLanguages.count > 1 && !searching,
-            showGlobeKey: needsInputModeSwitchKey,
-            returnKind: field.returnKind
+            showGlobeKey: globeKey,
+            // While searching, return only closes the search: a plain return key, never "Send".
+            returnKind: searching ? .default : field.returnKind
         )
         let layout = self.layout(for: request)
         let isPad = request.variant == .numberPad || request.variant == .decimalPad
@@ -371,14 +411,16 @@ final class KeyboardViewController: UIInputViewController {
             let offsets = touchOffsets(for: layout)
             let multiple = settings.activeLanguages.count > 1
             let spaceLabel = settings.appearance.showSpaceLanguageLabel && multiple ? controller.language.displayName : controller.language.spaceKeyLabel
-            let empty = (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
+            // The return key is dimmed (and inactive) only when both the field and the context agree it is empty.
+            let empty = !textDocumentProxy.hasText && (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty
+                && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
             keyboardView.languages = settings.activeLanguages
             // While searching emoji, keys type into the query: no trackpad, and letters arrive lower-case.
             keyboardView.spacebarCursor = settings.spacebarCursor && !searching
             keyboardView.configure(layout: layout, metrics: Self.metrics(baseMetrics, rows: layout.rows.count, filling: rows),
                                    theme: theme, shiftState: searching ? .off : controller.shiftState,
-                                   spaceLabel: spaceLabel, returnEnabled: !(field.enablesReturnKeyAutomatically && empty),
-                                   returnProminent: field.returnKind.isProminent,
+                                   spaceLabel: spaceLabel, returnEnabled: searching || !(field.enablesReturnKeyAutomatically && empty),
+                                   returnProminent: request.returnKind.isProminent,
                                    touchOffsets: offsets.offsets, touchOffsetsID: offsets.id)
         }
 
@@ -573,6 +615,14 @@ final class KeyboardViewController: UIInputViewController {
         unlockedCards = unlockedCards.filter { now.timeIntervalSince($0.value.1) < Self.unlockLifetime }
     }
 
+    private func rememberUnlocked(_ unlocked: UnlockedCard, id: UUID) {
+        unlockedCards[id] = (unlocked, Date())
+        // Purge on time even if the keyboard just stays open (not only at the next card use/appearance).
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.unlockLifetime + 1) { [weak self] in
+            self?.purgeExpiredCards()
+        }
+    }
+
     private func useCard(id: UUID) {
         purgeExpiredCards()
         if let cached = unlockedCards[id] {
@@ -589,7 +639,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         do {
             let unlocked = try CardVault.shared.unlock(id: id, cvv: nil)
-            unlockedCards[id] = (unlocked, Date())
+            rememberUnlocked(unlocked, id: id)
             fill(card: unlocked)
         } catch {
             showBarMessage(error.localizedDescription)
@@ -635,6 +685,7 @@ private func writeLearning(_ delta: UserModelDelta, to store: KeibordStore) -> (
 
 extension KeyboardViewController: InputControllerDelegate {
     func controllerStateDidChange(_ controller: InputController) {
+        documentSnapshot = DocumentSnapshot(textDocumentProxy)
         guard mode == .keys || mode == .emojiSearch else { return }
         render()
     }
@@ -648,7 +699,12 @@ extension KeyboardViewController: LearningSink {
         }
         guard settings.learningEnabled else { return }
         noteLearning(event)
-        if pendingEvents >= 25 { flushLearning() }
+        if pendingEvents >= 25 {
+            // A backspace right after an autocorrected commit takes back what it learned, which only the
+            // delta that recorded the commit can do: flush with the next event instead.
+            if case .committedWord(_, _, _, _, _, true) = event { return }
+            flushLearning()
+        }
     }
 }
 
@@ -705,12 +761,22 @@ extension KeyboardViewController: KeyboardViewDelegate {
         case .backspaceRepeat:
             if !query.isEmpty { query.removeLast() }
             playFeedback(sound: 1155)
-        case .space: query += " "
+        case .space:
+            query += " "
+            if searchPage != .letters {
+                searchPage = .letters // like the system keyboard: back to letters after a space
+                render()
+            }
+        case .switchPage(let page):
+            // "123" / "#+=" / "ABC" work in the query too (searching "100" finds 💯).
+            searchPage = page
+            render()
+            return
         case .returnKey, .emoji:
             mode = .emoji
             render()
             return
-        case .switchPage, .nextLanguage, .selectLanguage, .shift, .shiftDoubleTap, .moveCursor, .trackpad:
+        case .nextLanguage, .selectLanguage, .shift, .shiftDoubleTap, .moveCursor, .trackpad:
             return
         }
         updateEmojiSearch(query)
@@ -753,6 +819,7 @@ extension KeyboardViewController: EmojiPanelDelegate {
 
     func emojiPanelDidRequestSearch(_ panel: EmojiPanelView) {
         mode = .emojiSearch
+        searchPage = .letters
         render()
         updateEmojiSearch("")
     }
@@ -774,7 +841,7 @@ extension KeyboardViewController: CardUnlockViewDelegate {
         guard case .cardUnlock(let id) = mode else { return }
         do {
             let unlocked = try CardVault.shared.unlock(id: id, cvv: cvv)
-            unlockedCards[id] = (unlocked, Date())
+            rememberUnlocked(unlocked, id: id)
             mode = .keys
             render()
             fill(card: unlocked)

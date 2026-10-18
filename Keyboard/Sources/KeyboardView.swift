@@ -406,6 +406,8 @@ final class KeyboardView: UIView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
+            // While the space bar moves the cursor, a second finger brushing a key must not type it.
+            if trackpadActive, tracked.values.contains(where: { $0.mode == .trackpad }) { continue }
             commitPendingTaps()
             let point = touch.location(in: self)
             guard let resolver = resolver, let hit = resolver.resolve(point), frames.indices.contains(hit.frameIndex) else { continue }
@@ -568,6 +570,10 @@ final class KeyboardView: UIView {
             guard let t = tracked.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
             t.timer?.invalidate()
             t.timer = nil
+            if t.key.action == .globe, let event = event {
+                // The system must see the end of a globe touch too, or its keyboard list stays open.
+                delegate?.keyboardView(self, globeTouchedWith: event, in: self)
+            }
             if t.mode == .trackpad, trackpadActive {
                 trackpadActive = false
                 delegate?.keyboardView(self, didTrigger: .trackpad(false))
@@ -612,7 +618,10 @@ final class KeyboardView: UIView {
         case .insert(let text):
             delegate?.keyboardView(self, didTrigger: .character(text: text, tap: key.isLetter ? t.tap : nil, isLetter: key.isLetter))
         case .space: delegate?.keyboardView(self, didTrigger: .space)
-        case .returnKey: delegate?.keyboardView(self, didTrigger: .returnKey)
+        case .returnKey:
+            // Dimmed return key (`enablesReturnKeyAutomatically` and an empty field): like the system
+            // keyboard it does nothing, so e.g. an empty search or message is not submitted.
+            if returnEnabled { delegate?.keyboardView(self, didTrigger: .returnKey) }
         case .switchPage(let page): delegate?.keyboardView(self, didTrigger: .switchPage(page))
         case .emoji: delegate?.keyboardView(self, didTrigger: .emoji)
         case .nextLanguage: delegate?.keyboardView(self, didTrigger: .nextLanguage)
