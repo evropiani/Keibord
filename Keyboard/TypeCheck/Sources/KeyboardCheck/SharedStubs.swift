@@ -12,6 +12,7 @@ final class NSFileCoordinator {
         var rawValue: Int
         static let forReplacing = WritingOptions(rawValue: 1)
         static let forMerging = WritingOptions(rawValue: 2)
+        static let forDeleting = WritingOptions(rawValue: 4)
     }
 }
 
