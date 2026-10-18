@@ -308,7 +308,7 @@ urleiwand 2.3
 ur 3.0
 heast 2.5
 ned 2.6
-jo 2.4
+jo 3.5
 gö 2.3
 bissl 2.8
 bisserl 2.5
@@ -352,6 +352,13 @@ angefressen 2.3
 gschmackig 2.0
 Bub 3.6
 Buben 3.5
+
+# Colloquial short words that are also Albanian/Italian words ("ne" = we / of it), so the
+# corpus filter for names from foreign films would drop them; values from the German corpus.
+ne 5.5
+bla 4.0
+jep 3.5
+ehm 3.3
 
 # Places (the subtitle corpus is mostly German-German: "Österreich" 3.6 vs "Deutschland" 4.4)
 Österreich 4.5

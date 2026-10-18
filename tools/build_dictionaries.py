@@ -101,6 +101,9 @@ GERMAN_MID_SENTENCE_SHARE = 0.9
 # share of its relative frequency in its own corpus is a name or English from the same films and
 # series ("danny", "lorelai"); colloquial forms ("schnapp", "vabbè", "plako") are near 0.
 FOREIGN_SHARE = 0.25
+# A name is not translated: about as frequent in each of the other three corpora (share ~2-4 summed;
+# "ben" 5.9, "york" 2.8), unlike words the sibling dictionary just lacks ("northwest" 0.3, "nan" 1.1).
+NAME_SHARE = 1.5
 MIN_LOG2_BIGRAM = -8.0
 
 
@@ -124,6 +127,8 @@ class Language:
     supplement: str | None = None
     forced_caps: tuple = ()         # Capitalised forms Hunspell does not list on their own ("Sie")
     dominant_caps: tuple = ()       # Capitalised forms that are the main casing of their key ("Dio")
+    lower_main: tuple = ()          # ... and lower-case words that stay it although Google Books has
+                                    # them capitalised: interjections that mostly start a sentence ("tja")
     keep_duplicates: tuple = ()     # Capitalised/UPPER twins of very frequent words that are kept ("US")
     # Hunspell-valid diacritic-free words are dropped as misspellings when their accented twin is
     # at least `respell_ratio` times as frequent (and seen at least `respell_min_count` times).
@@ -152,6 +157,8 @@ LANGUAGES = {
         bigram_supplement="de-AT-bigrams.txt",
         supplement="de-AT-supplement.txt", reject="de-AT-reject.txt", must_have="de-AT-must-have.txt",
         forced_caps=("Sie", "Ihnen", "Ihr", "Ihre", "Ihren", "Ihrem", "Ihrer", "Ihres"),
+        lower_main=("aha", "tja", "naja", "ach", "hurra", "pfui", "juhu", "nanu", "huch", "igitt", "autsch",
+                    "ups", "hoppla", "oho", "ätsch"),
         known=["Haus", "Straße", "für", "schön", "Jänner"],
         required=["Haus", "Straße", "für", "schön", "ich", "Jänner", "Feber", "heuer", "Paradeiser",
                   "Erdäpfel", "Servus", "leiwand", "Sackerl", "E-Mail", "Essen", "essen", "Sie", "sie",
@@ -160,7 +167,7 @@ LANGUAGES = {
     "en-GB": Language(
         id="en-GB", corpus="en", hunspell="en/en_GB", letters="abcdefghijklmnopqrstuvwxyz",
         singles=frozenset({"a", "I"}), max_words=150_000, ngrams="english", sibling="en/en_US",
-        bigram_supplement="en-bigrams.txt",
+        bigram_supplement="en-bigrams.txt", dominant_caps=("Wales",),
         contractions="en-contractions.txt", supplement="en-supplement.txt", kept_list="en-kept.txt",
         reject="en-GB-reject.txt", must_have="en-must-have.txt", keep_duplicates=("US", "May", "God"),
         sloppy_suffix="g", known=["the", "colour", "London", "don't"],
@@ -169,7 +176,7 @@ LANGUAGES = {
     "en-US": Language(
         id="en-US", corpus="en", hunspell="en/en_US", letters="abcdefghijklmnopqrstuvwxyz",
         singles=frozenset({"a", "I"}), max_words=150_000, ngrams="english", sibling="en/en_GB",
-        bigram_supplement="en-bigrams.txt",
+        bigram_supplement="en-bigrams.txt", dominant_caps=("Wales",),
         contractions="en-contractions.txt", supplement="en-supplement.txt", kept_list="en-kept.txt",
         must_have="en-must-have.txt", keep_duplicates=("US", "May", "God"), sloppy_suffix="g",
         known=["the", "color", "London", "don't"],
@@ -905,15 +912,20 @@ def build_language(lang: Language, processes: int) -> tuple[bytes, dict, list[tu
     # whose sibling may know a name that their own dictionary lacks).
     english = None if lang.corpus == "en" else Hunspell(prepare_hunspell("en/en_US")["main"])
     namer = Hunspell(sibling) if sibling else english
-    # Frequencies of the unknown words (and of "danny" for "dannys") in the other subtitle corpora.
+    # Frequencies in the other subtitle corpora of the unknown words (and of "danny" for "dannys")
+    # and of the sibling's proper nouns.
     unknown = {w for w in tokens if not classified[w][0]}
     unknown |= {w[:-1] for w in unknown if w.endswith("s")}
-    others = [read_frequencies(code, unknown) for code in sorted({lg.corpus for lg in LANGUAGES.values()})
-              if code != lang.corpus] if english is not None else []
+    others = [read_frequencies(code, unknown | sibling_proper)
+              for code in sorted({lg.corpus for lg in LANGUAGES.values()}) if code != lang.corpus]
 
     def foreign_share(word: str) -> float:
         own = counts.get(word, 0) / total
         return sum(c.get(word, 0) / t for c, t in others) / own if own else 0.0
+
+    # Only names: words the sibling just lacks are rarer in the other subtitles ("nan" in en_GB only,
+    # "northwest", "gurney", "dang" in en_US only); two letters are mostly symbols ("Na", "Au").
+    sibling_proper = {w for w in sibling_proper if len(w) >= 3 and foreign_share(w) >= NAME_SHARE}
 
     def foreign_name(word: str) -> bool:
         """A name or English word from the same films ("danny"), also as a possessive ("dannys")."""
@@ -972,7 +984,7 @@ def build_language(lang: Language, processes: int) -> tuple[bytes, dict, list[tu
         forms = [(form, kind) for form, kind in forms if len(form) > 1 or form in lang.singles]
         kinds = {kind for _, kind in forms}
         dominant = None
-        if "lower" in kinds:
+        if "lower" in kinds and w not in lang.lower_main:
             # The Capitalised twin is the main form when Google Books has the word capitalised
             # (>= 92 %: "Zeit", "Hause", "God", "China"), German 2grams have it capitalised in
             # mid-sentence ("die Frage"; not for the most frequent words, which are mostly function

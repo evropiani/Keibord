@@ -266,3 +266,10 @@ baba 3
 leiwand 3
 Spital 3.5
 Matura 3
+
+# Colloquial
+ne 5
+nen 4.5
+oje 3.5
+aha 4
+tja 4.5

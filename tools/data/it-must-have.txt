@@ -200,6 +200,8 @@ Milano 3.5
 Italia 4
 Napoli 3.5
 Dio 5
+po' 5.5
+!po
 
 # Accent-less spellings that must be corrected, not kept
 !perche

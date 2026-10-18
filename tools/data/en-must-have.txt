@@ -233,6 +233,12 @@ America 4.5
 English 4.5
 Mr 5
 Mrs 4.5
+# Proper nouns whose lower-case twin is a rare common noun ("york", "china", "french")
+York 4.5
+French 4.5
+China 4
+Japan 4
+August 3.5
 
 # British / American spelling pairs
 en-GB: colour 4
