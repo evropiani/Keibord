@@ -37,24 +37,37 @@ final class SuggestionBarView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    private var appliedTheme: (dark: Bool, label: UIColor, accent: UIColor, highlight: UIColor, radius: CGFloat)?
+
     func update(_ newItems: [Suggestion], theme: KeyboardTheme) {
-        items = Array(newItems.prefix(3))
+        let trimmed = Array(newItems.prefix(3))
+        let themeKey = (dark: theme.isDark, label: theme.labelUIColor, accent: theme.accentColor, highlight: theme.barHighlight, radius: theme.cornerRadius)
+        // render() runs on every keystroke: leave the buttons alone when nothing changed.
+        if trimmed == items, let applied = appliedTheme, applied.dark == themeKey.dark, applied.label == themeKey.label,
+           applied.accent == themeKey.accent, applied.highlight == themeKey.highlight, applied.radius == themeKey.radius {
+            return
+        }
+        appliedTheme = themeKey
+        items = trimmed
         let single = items.count == 1 && (items[0].kind == .action || items[0].kind == .card)
-        for (i, b) in buttons.enumerated() {
-            if i < items.count {
-                let s = items[i]
-                b.isHidden = false
-                b.setTitle(s.display, for: .normal)
-                b.setTitleColor(theme.colors.label.uiColor, for: .normal)
-                let bold = s.isAutocorrect || s.kind == .card || s.kind == .action
-                b.titleLabel?.font = .systemFont(ofSize: 16, weight: bold ? .semibold : .regular)
-                if s.kind == .action { b.setTitleColor(theme.colors.accent.uiColor, for: .normal) }
-            } else {
-                b.isHidden = true
-                b.setTitle(nil, for: .normal)
+        // System buttons cross-fade title changes; while typing that makes the bar flicker.
+        UIView.performWithoutAnimation {
+            for (i, b) in buttons.enumerated() {
+                if i < items.count {
+                    let s = items[i]
+                    b.isHidden = false
+                    b.setTitle(s.display, for: .normal)
+                    b.setTitleColor(s.kind == .action ? theme.accentColor : theme.labelUIColor, for: .normal)
+                    let bold = s.isAutocorrect || s.kind == .card || s.kind == .action
+                    b.titleLabel?.font = .systemFont(ofSize: 16, weight: bold ? .semibold : .regular)
+                } else {
+                    b.isHidden = true
+                    b.setTitle(nil, for: .normal)
+                }
+                b.layoutIfNeeded()
             }
         }
-        separators.forEach { $0.backgroundColor = theme.colors.label.uiColor.withAlphaComponent(0.18) }
+        separators.forEach { $0.backgroundColor = theme.labelUIColor.withAlphaComponent(0.18) }
         separators[0].isHidden = items.count < 2 || single
         separators[1].isHidden = items.count < 3 || single
         highlight.backgroundColor = theme.barHighlight
@@ -205,6 +218,15 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         bottomBar.addArrangedSubview(back)
         variantStack.backgroundColor = theme.colors.characterKey.uiColor
         updateCategoryHighlight()
+    }
+
+    /// Frees the catalog (and the keyword tables it loaded for searching) while the panel is hidden;
+    /// `configure` is called again before it is shown.
+    func releaseData() {
+        catalog = nil
+        sections = []
+        variantStack.isHidden = true
+        collection.reloadData()
     }
 
     override func layoutSubviews() {
@@ -459,7 +481,10 @@ final class CardUnlockView: UIView {
         refreshDots()
         if digits.count == length {
             let entered = digits
+            // Do not keep the security code around in the view once it was handed over.
+            digits = ""
             delegate?.cardUnlockView(self, didEnter: entered)
+            refreshDots()
         }
     }
 }

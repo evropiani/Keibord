@@ -28,6 +28,11 @@ enum AppGroup {
             ids += alt.filter { $0.lowercased().contains("keibord") } + alt.filter { !$0.lowercased().contains("keibord") }
         }
         ids += provisioningProfileGroups()
+        // "group.$(KEIBORD_BUNDLE_ID)" from project.yml: App Store/TestFlight builds carry no
+        // embedded.mobileprovision, so with a custom bundle id this is the only way to find the group.
+        if let built = Bundle.main.object(forInfoDictionaryKey: "KeibordAppGroup") as? String, !built.isEmpty, !built.contains("$(") {
+            ids.append(built)
+        }
         ids.append(defaultIdentifier)
         var seen = Set<String>()
         return ids.filter { seen.insert($0).inserted }
