@@ -2,49 +2,78 @@ import UIKit
 import KeibordCore
 
 /// Resolved visual appearance used by all keyboard views.
+///
+/// The `UIColor`s keys need are resolved once per theme (the controller caches the theme), not per
+/// key and keystroke.
 struct KeyboardTheme {
-    var isDark: Bool
-    var colors: KeyColorScheme
-    var cornerRadius: CGFloat
-    var shadows: Bool
-    var labelScale: CGFloat
-    var uppercaseLabels: Bool
-    var showsPopups: Bool
-    var tints: [String: TintedKey]
+    let isDark: Bool
+    let colors: KeyColorScheme
+    let cornerRadius: CGFloat
+    let shadows: Bool
+    let labelScale: CGFloat
+    let uppercaseLabels: Bool
+    let showsPopups: Bool
+    let tints: [String: TintedKey]
+
+    let characterKeyColor: UIColor
+    let functionKeyColor: UIColor
+    let pressedFunctionKeyColor: UIColor
+    let accentColor: UIColor
+    let labelUIColor: UIColor
+    let keyShadowColor: UIColor
+    let secondaryLabel: UIColor
+    let backgroundColor: UIColor
+    private let tintFills: [String: UIColor]
+    private let tintLabels: [String: UIColor]
 
     init(settings: KeibordSettings, dark: Bool) {
         let a = settings.appearance
         isDark = dark
-        colors = a.colors(dark: dark)
+        let c = a.colors(dark: dark)
+        colors = c
         cornerRadius = CGFloat(a.keyCornerRadius)
         shadows = a.keyShadows
         labelScale = CGFloat(min(max(a.labelScale, 0.7), 1.4))
         uppercaseLabels = a.uppercaseLabels
         showsPopups = settings.keyPopups
         var t: [String: TintedKey] = [:]
-        for tint in a.tintedKeys { t[tint.keyID] = tint }
+        var fills: [String: UIColor] = [:]
+        var labels: [String: UIColor] = [:]
+        for tint in a.tintedKeys {
+            t[tint.keyID] = tint
+            fills[tint.keyID] = tint.color.uiColor
+            labels[tint.keyID] = tint.effectiveLabelColor.uiColor
+        }
         tints = t
+        tintFills = fills
+        tintLabels = labels
+        characterKeyColor = c.characterKey.uiColor
+        functionKeyColor = c.functionKey.uiColor
+        pressedFunctionKeyColor = c.pressedFunctionKey.uiColor
+        accentColor = c.accent.uiColor
+        labelUIColor = c.label.uiColor
+        keyShadowColor = c.keyShadow.uiColor
+        secondaryLabel = labelUIColor.withAlphaComponent(0.55)
+        backgroundColor = c.background?.uiColor ?? .clear
     }
 
     func keyColor(_ key: KeySpec, prominentReturn: Bool) -> UIColor {
-        if let tint = tints[key.id] { return tint.color.uiColor }
+        if let tint = tintFills[key.id] { return tint }
         switch key.style {
-        case .character, .space: return colors.characterKey.uiColor
-        case .returnKey: return prominentReturn ? colors.accent.uiColor : colors.functionKey.uiColor
-        case .function: return colors.functionKey.uiColor
+        case .character, .space: return characterKeyColor
+        case .returnKey: return prominentReturn ? accentColor : functionKeyColor
+        case .function: return functionKeyColor
         case .spacer: return .clear
         }
     }
 
     func labelColor(_ key: KeySpec, prominentReturn: Bool) -> UIColor {
-        if let tint = tints[key.id] { return tint.effectiveLabelColor.uiColor }
+        if let tint = tintLabels[key.id] { return tint }
         if key.style == .returnKey, prominentReturn { return .white }
-        return colors.label.uiColor
+        return labelUIColor
     }
 
-    var backgroundColor: UIColor { colors.background?.uiColor ?? .clear }
-    var secondaryLabel: UIColor { colors.label.uiColor.withAlphaComponent(0.55) }
-    var barHighlight: UIColor { colors.characterKey.uiColor.withAlphaComponent(isDark ? 0.45 : 0.9) }
+    var barHighlight: UIColor { characterKeyColor.withAlphaComponent(isDark ? 0.45 : 0.9) }
 }
 
 /// Wraps `UITextDocumentProxy` for the platform-independent input controller.

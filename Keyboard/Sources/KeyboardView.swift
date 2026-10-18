@@ -20,8 +20,28 @@ enum KeyboardViewEvent {
 
 protocol KeyboardViewDelegate: AnyObject {
     func keyboardView(_ view: KeyboardView, didTrigger event: KeyboardViewEvent)
-    /// Forward globe-key touches to `handleInputModeList(from:with:)`.
+    /// Forward globe-key touches to `handleInputModeList(from:with:)` (fallback for touches that land
+    /// next to the globe key's own control).
     func keyboardView(_ view: KeyboardView, globeTouchedWith event: UIEvent, in keyView: UIView)
+}
+
+/// Visual state of one key; `KeyView` only touches its layers when this changes.
+struct KeyAppearance: Equatable {
+    var fill: UIColor
+    var label: UIColor
+    var shadow: UIColor
+    var cornerRadius: CGFloat
+    var shadowHidden: Bool
+}
+
+/// Label text / SF Symbol of one key.
+struct KeyContent: Equatable {
+    var text: String?
+    var fontSize: CGFloat = 0
+    var fontWeight: UIFont.Weight = .regular
+    var symbol: String?
+    var symbolSize: CGFloat = 0
+    var symbolWeight: UIImage.SymbolWeight = .regular
 }
 
 /// One drawn key.
@@ -31,6 +51,8 @@ final class KeyView: UIView {
     private let shadowLayer = CALayer()
     private let fill = CALayer()
     var key: KeySpec
+    private var appliedAppearance: KeyAppearance?
+    private var appliedContent: KeyContent?
 
     init(key: KeySpec) {
         self.key = key
@@ -48,17 +70,38 @@ final class KeyView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func apply(fillColor: UIColor, labelColor: UIColor, theme: KeyboardTheme) {
+    /// Applies colours; a no-op when nothing changed (this runs for every key on every touch).
+    func apply(_ a: KeyAppearance) {
+        guard a != appliedAppearance else { return }
+        appliedAppearance = a
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        fill.backgroundColor = fillColor.cgColor
-        fill.cornerRadius = theme.cornerRadius
-        shadowLayer.backgroundColor = theme.colors.keyShadow.uiColor.cgColor
-        shadowLayer.cornerRadius = theme.cornerRadius
-        shadowLayer.isHidden = !theme.shadows || key.style == .spacer
+        fill.backgroundColor = a.fill.cgColor
+        fill.cornerRadius = a.cornerRadius
+        shadowLayer.backgroundColor = a.shadow.cgColor
+        shadowLayer.cornerRadius = a.cornerRadius
+        shadowLayer.isHidden = a.shadowHidden
         CATransaction.commit()
-        label.textColor = labelColor
-        icon.tintColor = labelColor
+        label.textColor = a.label
+        icon.tintColor = a.label
+    }
+
+    /// Applies text and icon; unchanged labels are not reset (that would redraw every label per touch).
+    func apply(_ c: KeyContent) {
+        guard c != appliedContent else { return }
+        let old = appliedContent
+        appliedContent = c
+        if c.text != old?.text { label.text = c.text }
+        if c.fontSize != old?.fontSize || c.fontWeight != old?.fontWeight {
+            label.font = .systemFont(ofSize: max(c.fontSize, 1), weight: c.fontWeight)
+        }
+        if c.symbol != old?.symbol || c.symbolSize != old?.symbolSize || c.symbolWeight != old?.symbolWeight {
+            if let name = c.symbol {
+                icon.image = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: c.symbolSize, weight: c.symbolWeight))
+            } else {
+                icon.image = nil
+            }
+        }
     }
 
     override func layoutSubviews() {
@@ -76,6 +119,9 @@ final class KeyView: UIView {
 /// The key area: draws keys and turns touches into `KeyboardViewEvent`s.
 final class KeyboardView: UIView {
     weak var delegate: KeyboardViewDelegate?
+    /// Receives the globe key's touches through `handleInputModeList(from:with:)` (Apple's documented
+    /// target/action for the input-mode key).
+    weak var inputModeTarget: UIInputViewController?
 
     private(set) var layout: KeyboardLayout?
     private var metrics = KeyboardMetrics.standard(height: .standard, landscape: false)
@@ -83,7 +129,9 @@ final class KeyboardView: UIView {
     private var shiftState: ShiftState = .off
     private var spaceLabel = ""
     private var returnEnabled = true
+    private var prominentReturn = false
     private var touchOffsets: [String: (dx: Double, dy: Double)] = [:]
+    private var touchOffsetsID = ""
     var languages: [KeyboardLanguage] = []
     var spacebarCursor = true
 
@@ -94,27 +142,42 @@ final class KeyboardView: UIView {
 
     private let popup = KeyPopupView()
     private let callout = CalloutView()
+    private var globeControl: UIControl?
+    private var globeIndex: Int?
+    private var globePressed = false
 
     // Touch tracking
     private enum Mode { case normal, callout, trackpad, repeating }
     private final class Tracked {
         var frameIndex: Int
+        /// The key this touch is on, captured when it began (or slid onto it), so it commits correctly
+        /// even if the layout was rebuilt in between.
+        var key: KeySpec
         var tap: TapInput?
         var mode: Mode = .normal
         var timer: Timer?
-        var startTime: TimeInterval
+        let order: Int
         var lastX: CGFloat = 0
         var cursorRemainder: CGFloat = 0
-        init(frameIndex: Int, tap: TapInput?, startTime: TimeInterval) {
+        var repeatTicks = 0
+        init(frameIndex: Int, key: KeySpec, tap: TapInput?, order: Int) {
             self.frameIndex = frameIndex
+            self.key = key
             self.tap = tap
-            self.startTime = startTime
+            self.order = order
         }
         deinit { timer?.invalidate() }
     }
     private var tracked: [ObjectIdentifier: Tracked] = [:]
+    private var touchCounter = 0
     private var lastShiftTap: TimeInterval = 0
     private var trackpadActive = false
+
+    /// Backspace: repeat starts after 0.5 s, then every 0.09 s; whole words after 1.6 s, at half that rate.
+    private static let backspaceRepeatDelay: TimeInterval = 0.5
+    private static let backspaceRepeatInterval: TimeInterval = 0.09
+    private static let backspaceWordModeDelay: TimeInterval = 1.6
+    private static let trackpadStep: CGFloat = 9
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -129,10 +192,14 @@ final class KeyboardView: UIView {
 
     // MARK: Configuration
 
+    /// `touchOffsetsID` identifies `touchOffsets` (layout + learning generation): the touch resolver is
+    /// only rebuilt when it changes, not on every keystroke.
     func configure(layout: KeyboardLayout, metrics: KeyboardMetrics, theme: KeyboardTheme, shiftState: ShiftState,
-                   spaceLabel: String, returnEnabled: Bool, returnProminent: Bool, touchOffsets: [String: (dx: Double, dy: Double)]) {
+                   spaceLabel: String, returnEnabled: Bool, returnProminent: Bool,
+                   touchOffsets: [String: (dx: Double, dy: Double)], touchOffsetsID: String) {
         prominentReturn = returnProminent
         let layoutChanged = layout != self.layout || metrics != self.metrics
+        let offsetsChanged = touchOffsetsID != self.touchOffsetsID
         self.layout = layout
         self.metrics = metrics
         self.theme = theme
@@ -140,10 +207,14 @@ final class KeyboardView: UIView {
         self.spaceLabel = spaceLabel
         self.returnEnabled = returnEnabled
         self.touchOffsets = touchOffsets
+        self.touchOffsetsID = touchOffsetsID
         if layoutChanged {
             cancelAllTouches()
             rebuildKeys()
-        } else {
+            // Build the new frames now: a touch that begins right after a rollover commit switched the
+            // page (e.g. space after a digit) must resolve against the new page, not the old one.
+            layoutIfNeeded()
+        } else if offsetsChanged {
             resolver = TouchResolver(frames: frames, offsets: touchOffsets, touchModelKey: layout.touchModelKey)
         }
         refreshAppearance()
@@ -152,6 +223,9 @@ final class KeyboardView: UIView {
     private func rebuildKeys() {
         keyViews.values.forEach { $0.removeFromSuperview() }
         keyViews = [:]
+        globeControl?.removeFromSuperview()
+        globeControl = nil
+        globeIndex = nil
         laidOutWidth = 0
         setNeedsLayout()
     }
@@ -165,11 +239,15 @@ final class KeyboardView: UIView {
         resolver = TouchResolver(frames: frames, offsets: touchOffsets, touchModelKey: layout.touchModelKey)
         keyViews.values.forEach { $0.removeFromSuperview() }
         keyViews = [:]
+        globeControl?.removeFromSuperview()
+        globeControl = nil
+        globeIndex = nil
         for f in frames where f.key.style != .spacer {
             let v = KeyView(key: f.key)
             v.frame = f.rect
             addSubview(v)
             keyViews[f.index] = v
+            if f.key.action == .globe { installGlobeControl(for: f) }
         }
         if popup.superview == nil { addSubview(popup) }
         if callout.superview == nil { addSubview(callout) }
@@ -178,85 +256,123 @@ final class KeyboardView: UIView {
         refreshAppearance()
     }
 
-    private var prominentReturn = false
+    /// The globe key gets a real `UIControl` wired to `handleInputModeList(from:with:)` for all touch
+    /// events (tap → next keyboard, hold → keyboard list), as Apple's template does. It covers the key
+    /// plus half the gaps around it down to the bottom edge, like the touch resolver would.
+    private func installGlobeControl(for f: KeyFrame) {
+        let control = UIControl()
+        control.backgroundColor = .clear
+        let halfGap = metrics.horizontalGap / 2
+        let top = f.rect.minY - (metrics.rowPitch - metrics.keyHeight) / 2
+        control.frame = CGRect(x: f.rect.minX - halfGap, y: top, width: f.rect.width + 2 * halfGap,
+                               height: metrics.rowPitch + metrics.bottomInset)
+        control.addTarget(self, action: #selector(globeTouchDown), for: .touchDown)
+        control.addTarget(self, action: #selector(globeTouchEnded), for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        if let target = inputModeTarget {
+            control.addTarget(target, action: #selector(UIInputViewController.handleInputModeList(from:with:)), for: .allTouchEvents)
+        }
+        addSubview(control)
+        globeControl = control
+        globeIndex = f.index
+    }
+
+    @objc private func globeTouchDown() {
+        commitPendingTaps()
+        globePressed = true
+        if let index = globeIndex, frames.indices.contains(index) {
+            delegate?.keyboardView(self, didTrigger: .keyDown(frames[index].key))
+        }
+        refreshAppearance()
+    }
+
+    @objc private func globeTouchEnded() {
+        globePressed = false
+        refreshAppearance()
+    }
 
     func refreshAppearance() {
         guard let theme = theme else { return }
-        let prominent = prominentReturn
+        let labelAlpha: CGFloat = trackpadActive ? 0 : 1
         for (index, view) in keyViews {
+            guard frames.indices.contains(index) else { continue }
             let key = frames[index].key
-            let pressed = isPressed(index)
-            var fill = theme.keyColor(key, prominentReturn: prominent)
-            if pressed, !(key.style == .character && theme.showsPopups && key.isLetter) {
-                fill = key.style == .function || key.style == .returnKey ? theme.colors.pressedFunctionKey.uiColor : theme.colors.functionKey.uiColor
-            }
-            if key.id == "shift", shiftState != .off, theme.tints[key.id] == nil {
-                fill = theme.colors.characterKey.uiColor
-            }
-            view.apply(fillColor: fill, labelColor: theme.labelColor(key, prominentReturn: prominent), theme: theme)
-            configureContent(view, key: key, theme: theme)
-            view.alpha = (key.id == "return" && !returnEnabled) ? 0.5 : 1
-            view.label.alpha = trackpadActive ? 0 : 1
-            view.icon.alpha = trackpadActive ? 0 : 1
+            view.apply(appearance(for: key, pressed: isPressed(index), theme: theme))
+            view.apply(content(for: key, theme: theme))
+            let alpha: CGFloat = (key.id == "return" && !returnEnabled) ? 0.5 : 1
+            if view.alpha != alpha { view.alpha = alpha }
+            if view.label.alpha != labelAlpha { view.label.alpha = labelAlpha }
+            if view.icon.alpha != labelAlpha { view.icon.alpha = labelAlpha }
         }
     }
 
-    private func isPressed(_ index: Int) -> Bool {
-        tracked.values.contains { $0.frameIndex == index && $0.mode != .trackpad }
+    private func appearance(for key: KeySpec, pressed: Bool, theme: KeyboardTheme) -> KeyAppearance {
+        var fill = theme.keyColor(key, prominentReturn: prominentReturn)
+        // Keys with a preview balloon keep their colour while pressed (the balloon is the feedback).
+        if pressed, !showsPopup(for: key) {
+            fill = key.style == .function || key.style == .returnKey ? theme.pressedFunctionKeyColor : theme.functionKeyColor
+        }
+        if key.id == "shift", shiftState != .off, theme.tints[key.id] == nil {
+            fill = theme.characterKeyColor
+        }
+        var labelColor = theme.labelColor(key, prominentReturn: prominentReturn)
+        if key.id == "space", theme.tints["space"] == nil { labelColor = theme.secondaryLabel }
+        return KeyAppearance(fill: fill, label: labelColor, shadow: theme.keyShadowColor, cornerRadius: theme.cornerRadius,
+                             shadowHidden: !theme.shadows || key.style == .spacer)
     }
 
-    private func symbol(_ name: String, _ size: CGFloat, weight: UIImage.SymbolWeight = .regular) -> UIImage? {
-        UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: weight))
-    }
-
-    private func configureContent(_ view: KeyView, key: KeySpec, theme: KeyboardTheme) {
+    private func content(for key: KeySpec, theme: KeyboardTheme) -> KeyContent {
         let scale = theme.labelScale
-        view.icon.image = nil
-        view.label.text = nil
         switch key.id {
         case "shift":
             let name = shiftState == .locked ? "capslock.fill" : (shiftState == .on ? "shift.fill" : "shift")
-            view.icon.image = symbol(name, 18 * scale, weight: .medium)
-            return
+            return KeyContent(symbol: name, symbolSize: 18 * scale, symbolWeight: .medium)
         case "backspace":
-            view.icon.image = symbol("delete.left", 18 * scale)
-            return
+            return KeyContent(symbol: "delete.left", symbolSize: 18 * scale)
         case "emoji":
-            view.icon.image = symbol("face.smiling", 20 * scale)
-            return
+            return KeyContent(symbol: "face.smiling", symbolSize: 20 * scale)
         case "globe":
-            view.icon.image = symbol("globe", 19 * scale)
-            return
+            return KeyContent(symbol: "globe", symbolSize: 19 * scale)
         case "return" where key.label.isEmpty:
-            view.icon.image = symbol("return", 19 * scale)
-            return
+            return KeyContent(symbol: "return", symbolSize: 19 * scale)
         case "space":
-            view.label.text = spaceLabel
-            view.label.font = .systemFont(ofSize: 15 * scale)
-            view.label.textColor = theme.tints["space"] == nil ? theme.secondaryLabel : theme.labelColor(key, prominentReturn: false)
-            return
+            return KeyContent(text: spaceLabel, fontSize: 15 * scale)
         default:
             break
         }
-        var text = key.label
-        if key.isLetter, shiftState != .off || theme.uppercaseLabels {
-            text = text == "ß" ? "ẞ" : text.uppercased()
-        }
-        view.label.text = text
+        let text = displayLabel(key, theme: theme)
         switch key.style {
         case .character:
             let size: CGFloat = key.isLetter ? 23 : (text.count > 1 ? 16 : 22)
-            view.label.font = .systemFont(ofSize: size * scale, weight: .regular)
+            return KeyContent(text: text, fontSize: size * scale)
         default:
-            view.label.font = .systemFont(ofSize: 15 * scale, weight: .regular)
+            return KeyContent(text: text, fontSize: 15 * scale)
         }
+    }
+
+    /// Label of a key in the current shift state. "ß" stays "ß": the input controller inserts "ß" (not
+    /// "SS"/"ẞ") when shifted, so the label shows what the key types.
+    private func displayLabel(_ key: KeySpec, theme: KeyboardTheme) -> String {
+        guard key.isLetter, shiftState != .off || theme.uppercaseLabels else { return key.label }
+        return key.label == "ß" ? key.label : key.label.uppercased()
+    }
+
+    private func showsPopup(for key: KeySpec) -> Bool {
+        guard let theme = theme, theme.showsPopups else { return false }
+        return key.style == .character && key.label.count <= 2
+    }
+
+    private func isPressed(_ index: Int) -> Bool {
+        if globePressed, index == globeIndex { return true }
+        return tracked.values.contains { $0.frameIndex == index && $0.mode != .trackpad }
     }
 
     // MARK: Touches
 
-    private func cancelAllTouches() {
+    /// Drops every tracked touch without committing it (layout change, keyboard disappearing).
+    func cancelAllTouches() {
         tracked.values.forEach { $0.timer?.invalidate() }
         tracked = [:]
+        globePressed = false
         popup.isHidden = true
         callout.isHidden = true
         if trackpadActive {
@@ -265,17 +381,33 @@ final class KeyboardView: UIView {
         }
     }
 
+    /// Keys that commit early when another touch begins (rollover), like the system keyboard.
+    private static func commitsOnRollover(_ key: KeySpec) -> Bool {
+        switch key.action {
+        case .insert, .space, .returnKey, .switchPage: return true
+        default: return false
+        }
+    }
+
+    /// Rollover: a new touch commits pending taps first, in the order they began, so fast typing never
+    /// loses or reorders characters (also spaces and page keys: "5", space, "U" → "5 U" on letters).
+    private func commitPendingTaps() {
+        let pending = tracked.filter { $0.value.mode == .normal && Self.commitsOnRollover($0.value.key) }
+            .sorted { $0.value.order < $1.value.order }
+        for (id, t) in pending {
+            tracked[id] = nil
+            commit(t)
+        }
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
-            // Rollover: a new touch commits a pending character touch immediately.
-            for (id, t) in tracked where t.mode == .normal && frames.indices.contains(t.frameIndex) && frames[t.frameIndex].key.style == .character {
-                commit(t)
-                tracked[id] = nil
-            }
+            commitPendingTaps()
             let point = touch.location(in: self)
-            guard let resolver = resolver, let hit = resolver.resolve(point) else { continue }
+            guard let resolver = resolver, let hit = resolver.resolve(point), frames.indices.contains(hit.frameIndex) else { continue }
             let key = frames[hit.frameIndex].key
-            let t = Tracked(frameIndex: hit.frameIndex, tap: hit.tap, startTime: touch.timestamp)
+            touchCounter += 1
+            let t = Tracked(frameIndex: hit.frameIndex, key: key, tap: hit.tap, order: touchCounter)
             t.lastX = point.x
             tracked[ObjectIdentifier(touch)] = t
             delegate?.keyboardView(self, didTrigger: .keyDown(key))
@@ -290,11 +422,14 @@ final class KeyboardView: UIView {
             delegate?.keyboardView(self, didTrigger: .backspace)
             t.mode = .repeating
             let start = Date()
-            t.timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self, weak t] _ in
+            t.timer = Timer.scheduledTimer(withTimeInterval: Self.backspaceRepeatDelay, repeats: false) { [weak self, weak t] _ in
                 guard let self = self, let t = t else { return }
-                t.timer = Timer.scheduledTimer(withTimeInterval: 0.09, repeats: true) { [weak self] _ in
-                    guard let self = self else { return }
-                    let wordMode = Date().timeIntervalSince(start) > 1.6
+                t.timer = Timer.scheduledTimer(withTimeInterval: Self.backspaceRepeatInterval, repeats: true) { [weak self, weak t] _ in
+                    guard let self = self, let t = t else { return }
+                    t.repeatTicks += 1
+                    let wordMode = Date().timeIntervalSince(start) > Self.backspaceWordModeDelay
+                    // Whole words go at half the rate (every 0.18 s), so the user can stop in time.
+                    if wordMode, t.repeatTicks % 2 != 0 { return }
                     self.delegate?.keyboardView(self, didTrigger: .backspaceRepeat(wordMode: wordMode))
                 }
             }
@@ -312,12 +447,10 @@ final class KeyboardView: UIView {
         case .nextLanguage:
             if languages.count > 1 { scheduleLongPress(t, delay: 0.4) }
         case .globe:
-            if let event = event, let view = keyViews[t.frameIndex] {
-                delegate?.keyboardView(self, globeTouchedWith: event, in: view)
-            }
+            if let event = event { delegate?.keyboardView(self, globeTouchedWith: event, in: self) }
         case .insert:
             showPopup(for: t.frameIndex)
-            if !keyAlternates(frames[t.frameIndex].key).isEmpty { scheduleLongPress(t, delay: 0.42) }
+            if !keyAlternates(key).isEmpty { scheduleLongPress(t, delay: 0.42) }
         default:
             break
         }
@@ -337,17 +470,22 @@ final class KeyboardView: UIView {
     }
 
     private func longPress(_ t: Tracked) {
-        guard frames.indices.contains(t.frameIndex) else { return }
-        let key = frames[t.frameIndex].key
+        // A touch that is no longer tracked (committed by rollover, cancelled) must not open anything.
+        guard tracked.values.contains(where: { $0 === t }), t.mode == .normal, frames.indices.contains(t.frameIndex) else { return }
+        let key = t.key
         switch key.action {
         case .space:
             t.mode = .trackpad
+            // Measure the drag from where the finger is now, not from where it first touched.
+            t.cursorRemainder = 0
+            popup.isHidden = true
             trackpadActive = true
             delegate?.keyboardView(self, didTrigger: .trackpad(true))
             refreshAppearance()
         case .nextLanguage:
             t.mode = .callout
-            showCallout(options: languages.map { $0.displayName }, for: t.frameIndex, selected: languages.firstIndex(where: { $0.shortLabel == key.label }) ?? 0)
+            let current = languages.firstIndex(where: { $0.shortLabel == key.label }) ?? 0
+            showCallout(options: languages.map { $0.displayName }, for: t.frameIndex, selected: current)
         case .insert:
             let options = keyAlternates(key)
             guard !options.isEmpty else { return }
@@ -367,7 +505,7 @@ final class KeyboardView: UIView {
             case .trackpad:
                 t.cursorRemainder += point.x - t.lastX
                 t.lastX = point.x
-                let step: CGFloat = 9
+                let step = Self.trackpadStep
                 let n = Int(t.cursorRemainder / step)
                 if n != 0 {
                     t.cursorRemainder -= CGFloat(n) * step
@@ -376,20 +514,22 @@ final class KeyboardView: UIView {
             case .callout:
                 callout.select(at: convert(point, to: callout))
             case .normal:
-                guard frames.indices.contains(t.frameIndex) else { continue }
-                let key = frames[t.frameIndex].key
-                if key.action == .globe, let event = event, let view = keyViews[t.frameIndex] {
-                    delegate?.keyboardView(self, globeTouchedWith: event, in: view)
+                t.lastX = point.x
+                if t.key.action == .globe {
+                    if let event = event { delegate?.keyboardView(self, globeTouchedWith: event, in: self) }
                     continue
                 }
-                guard key.style == .character, let hit = resolver?.resolve(point), hit.frameIndex != t.frameIndex,
-                      frames[hit.frameIndex].key.style == .character else { continue }
+                guard t.key.style == .character, let hit = resolver?.resolve(point), hit.frameIndex != t.frameIndex,
+                      frames.indices.contains(hit.frameIndex), frames[hit.frameIndex].key.style == .character else { continue }
                 // Slide to a neighbouring character key.
+                let key = frames[hit.frameIndex].key
                 t.frameIndex = hit.frameIndex
+                t.key = key
                 t.tap = hit.tap
                 showPopup(for: hit.frameIndex)
                 t.timer?.invalidate()
-                if !keyAlternates(frames[hit.frameIndex].key).isEmpty { scheduleLongPress(t, delay: 0.42) }
+                t.timer = nil
+                if !keyAlternates(key).isEmpty { scheduleLongPress(t, delay: 0.42) }
                 refreshAppearance()
             case .repeating:
                 break
@@ -401,9 +541,9 @@ final class KeyboardView: UIView {
         for touch in touches {
             guard let t = tracked.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
             t.timer?.invalidate()
-            if frames.indices.contains(t.frameIndex), frames[t.frameIndex].key.action == .globe,
-               let event = event, let view = keyViews[t.frameIndex] {
-                delegate?.keyboardView(self, globeTouchedWith: event, in: view)
+            t.timer = nil
+            if t.key.action == .globe {
+                if let event = event { delegate?.keyboardView(self, globeTouchedWith: event, in: self) }
             } else {
                 commit(t)
             }
@@ -416,21 +556,26 @@ final class KeyboardView: UIView {
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
-            tracked.removeValue(forKey: ObjectIdentifier(touch))?.timer?.invalidate()
+            guard let t = tracked.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
+            t.timer?.invalidate()
+            t.timer = nil
+            if t.mode == .trackpad, trackpadActive {
+                trackpadActive = false
+                delegate?.keyboardView(self, didTrigger: .trackpad(false))
+            }
+            if t.mode == .callout { callout.isHidden = true }
         }
-        popup.isHidden = true
-        callout.isHidden = true
-        if trackpadActive {
-            trackpadActive = false
-            delegate?.keyboardView(self, didTrigger: .trackpad(false))
+        if tracked.isEmpty {
+            popup.isHidden = true
+            callout.isHidden = true
         }
         refreshAppearance()
     }
 
     private func commit(_ t: Tracked) {
         t.timer?.invalidate()
-        guard frames.indices.contains(t.frameIndex) else { return }
-        let key = frames[t.frameIndex].key
+        t.timer = nil
+        let key = t.key
         popup.isHidden = true
         switch t.mode {
         case .trackpad:
@@ -468,19 +613,22 @@ final class KeyboardView: UIView {
 
     // MARK: Popups
 
+    /// Top of the keyboard's input view in this view's coordinates: the system clips anything above it.
+    private var visibleTop: CGFloat {
+        guard let container = superview else { return 0 }
+        return convert(CGPoint(x: 0, y: container.bounds.minY), from: container).y
+    }
+
     private func showPopup(for index: Int) {
-        guard let theme = theme, theme.showsPopups, frames.indices.contains(index) else { popup.isHidden = true; return }
+        guard let theme = theme, frames.indices.contains(index), showsPopup(for: frames[index].key) else { popup.isHidden = true; return }
         let key = frames[index].key
-        guard key.style == .character, key.label.count <= 2 else { popup.isHidden = true; return }
-        var text = key.label
-        if key.isLetter, shiftState != .off || theme.uppercaseLabels { text = text == "ß" ? "ẞ" : text.uppercased() }
-        popup.show(text: text, keyRect: frames[index].rect, in: bounds, theme: theme)
+        popup.show(text: displayLabel(key, theme: theme), keyRect: frames[index].rect, in: bounds, minY: visibleTop, theme: theme)
         bringSubviewToFront(popup)
     }
 
     private func showCallout(options: [String], for index: Int, selected: Int) {
-        guard let theme = theme else { return }
-        callout.show(options: options, keyRect: frames[index].rect, in: bounds, theme: theme, selected: selected)
+        guard let theme = theme, frames.indices.contains(index) else { return }
+        callout.show(options: options, keyRect: frames[index].rect, in: bounds, minY: visibleTop, theme: theme, selected: selected)
         bringSubviewToFront(callout)
     }
 }
@@ -503,11 +651,13 @@ final class KeyPopupView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func show(text: String, keyRect: CGRect, in bounds: CGRect, theme: KeyboardTheme) {
+    /// `minY` is the highest visible y (the top of the input view); the balloon never goes above it.
+    func show(text: String, keyRect: CGRect, in bounds: CGRect, minY: CGFloat, theme: KeyboardTheme) {
         let extra: CGFloat = 10
         let topHeight = keyRect.height * 1.05
         var top = CGRect(x: keyRect.minX - extra, y: keyRect.minY - topHeight - 4, width: keyRect.width + 2 * extra, height: topHeight)
         top.origin.x = min(max(top.minX, 0), bounds.width - top.width)
+        top.origin.y = max(top.minY, minY)
         let whole = top.union(keyRect)
         frame = whole
         let t = top.offsetBy(dx: -whole.minX, dy: -whole.minY)
@@ -531,10 +681,10 @@ final class KeyPopupView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         shape.path = path.cgPath
-        shape.fillColor = theme.colors.characterKey.uiColor.cgColor
+        shape.fillColor = theme.characterKeyColor.cgColor
         CATransaction.commit()
         label.text = text
-        label.textColor = theme.colors.label.uiColor
+        label.textColor = theme.labelUIColor
         label.font = .systemFont(ofSize: 34 * theme.labelScale, weight: .light)
         label.frame = t
         isHidden = false
@@ -547,6 +697,8 @@ final class CalloutView: UIView {
     private(set) var selectedIndex: Int?
     private var theme: KeyboardTheme?
     private var vertical = false
+    /// Horizontal menu laid out right-to-left (keys on the right half), so option 0 sits above the key.
+    private var reversed = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -558,49 +710,79 @@ final class CalloutView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func show(options: [String], keyRect: CGRect, in bounds: CGRect, theme: KeyboardTheme, selected: Int) {
+    /// Shows the menu above `keyRect`, inside `bounds` horizontally and below `minY` (the top of the
+    /// input view; the system clips anything above it) vertically.
+    func show(options: [String], keyRect: CGRect, in bounds: CGRect, minY: CGFloat, theme: KeyboardTheme, selected: Int) {
         self.theme = theme
         labels.forEach { $0.removeFromSuperview() }
         labels = []
+        guard !options.isEmpty else {
+            selectedIndex = nil
+            isHidden = true
+            return
+        }
         vertical = options.contains { $0.count > 3 }
-        let cell = CGSize(width: vertical ? 190 : max(30, keyRect.width), height: vertical ? 40 : keyRect.height + 4)
-        let size = vertical ? CGSize(width: cell.width, height: cell.height * CGFloat(options.count))
-                            : CGSize(width: cell.width * CGFloat(options.count), height: cell.height)
-        var origin = CGPoint(x: keyRect.midX - cell.width / 2, y: keyRect.minY - size.height - 6)
+        let count = CGFloat(options.count)
+        let gap: CGFloat = 6
+        let cell: CGSize
+        if vertical {
+            // Rows shrink (down to 28 pt) so a long language list fits between the top and the key.
+            let room = keyRect.minY - gap - minY
+            cell = CGSize(width: min(190, max(bounds.width - 4, 1)), height: max(28, min(40, room / count)))
+        } else {
+            // Cells shrink so even a long accent list fits the width.
+            cell = CGSize(width: min(max(30, keyRect.width), max(bounds.width - 4, 1) / count), height: keyRect.height + 4)
+        }
+        let size = vertical ? CGSize(width: cell.width, height: cell.height * count)
+                            : CGSize(width: cell.width * count, height: cell.height)
+        reversed = !vertical && options.count > 1 && keyRect.midX > bounds.midX
+        var origin = CGPoint(x: reversed ? keyRect.midX + cell.width / 2 - size.width : keyRect.midX - cell.width / 2,
+                             y: max(minY, keyRect.minY - size.height - gap))
         if vertical { origin.x = keyRect.minX }
         origin.x = min(max(origin.x, 2), bounds.width - size.width - 2)
         frame = CGRect(origin: origin, size: size)
-        backgroundColor = theme.colors.characterKey.uiColor
+        backgroundColor = theme.characterKeyColor
         layer.cornerRadius = theme.cornerRadius + 2
         for (i, option) in options.enumerated() {
             let l = UILabel()
             l.text = option
             l.textAlignment = .center
             l.font = .systemFont(ofSize: vertical ? 17 : 24 * theme.labelScale)
+            l.adjustsFontSizeToFitWidth = true
+            l.minimumScaleFactor = 0.6
             l.layer.cornerRadius = theme.cornerRadius
             l.layer.masksToBounds = true
+            let slot = reversed ? options.count - 1 - i : i
             l.frame = vertical ? CGRect(x: 0, y: CGFloat(i) * cell.height, width: cell.width, height: cell.height)
-                               : CGRect(x: CGFloat(i) * cell.width, y: 0, width: cell.width, height: cell.height)
+                               : CGRect(x: CGFloat(slot) * cell.width, y: 0, width: cell.width, height: cell.height)
             addSubview(l)
             labels.append(l)
         }
-        setSelected(selected)
+        setSelected(min(max(selected, 0), options.count - 1))
         isHidden = false
     }
 
     func select(at point: CGPoint) {
         guard !labels.isEmpty else { return }
-        let coordinate = vertical ? point.y : point.x
-        let length = vertical ? labels[0].frame.height : labels[0].frame.width
-        setSelected(min(max(Int(floor(coordinate / max(length, 1))), 0), labels.count - 1))
+        if vertical {
+            // The finger starts on the key below the list: keep the current choice until it moves up into
+            // the list, so a long-press released without moving changes nothing.
+            guard point.y < bounds.height else { return }
+            let height = max(labels[0].frame.height, 1)
+            setSelected(min(max(Int(floor(point.y / height)), 0), labels.count - 1))
+        } else {
+            let width = max(labels[0].frame.width, 1)
+            let slot = min(max(Int(floor(point.x / width)), 0), labels.count - 1)
+            setSelected(reversed ? labels.count - 1 - slot : slot)
+        }
     }
 
     private func setSelected(_ index: Int) {
         guard let theme = theme else { return }
         selectedIndex = index
         for (i, l) in labels.enumerated() {
-            l.backgroundColor = i == index ? theme.colors.accent.uiColor : .clear
-            l.textColor = i == index ? .white : theme.colors.label.uiColor
+            l.backgroundColor = i == index ? theme.accentColor : .clear
+            l.textColor = i == index ? .white : theme.labelUIColor
         }
     }
 }

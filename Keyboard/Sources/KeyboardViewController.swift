@@ -13,9 +13,13 @@ final class KeyboardViewController: UIInputViewController {
 
     private let suggestionBar = SuggestionBarView()
     private let keyboardView = KeyboardView()
+    // Created on first use only (each flag says whether the view exists and is in the hierarchy).
     private lazy var emojiPanel = EmojiPanelView()
     private lazy var emojiSearchBar = EmojiSearchBarView()
     private lazy var cardUnlockView = CardUnlockView()
+    private var emojiPanelAdded = false
+    private var emojiSearchBarAdded = false
+    private var cardUnlockAdded = false
     private var heightConstraint: NSLayoutConstraint?
 
     private enum Mode: Equatable { case keys, emoji, emojiSearch, cardUnlock(UUID) }
@@ -25,15 +29,42 @@ final class KeyboardViewController: UIInputViewController {
     private var pendingEvents = 0
     private var settingsDate: Date?
     private var profileDate: Date?
+    /// Modification date of user-model.json as last loaded or written by this keyboard. Another date on
+    /// disk means the app changed the file (dictionary edits, import, reset).
+    private var userModelDate: Date?
+    /// Writes learning data (JSON decode/encode + coordinated file IO) off the main thread, in order.
+    private let flushQueue = DispatchQueue(label: "com.keibord.keyboard.learning", qos: .utility)
+    /// The engine has not seen the latest learned words/bigrams yet; refreshed when typing pauses.
+    private var engineNeedsUserModel = false
+    /// A word became "known" since the user lexicon was last built.
+    private var userLexiconDirty = false
+    private var engineRefreshWork: DispatchWorkItem?
+    private var lastSupplementaryRequest: Date?
+    /// `hasFullAccess`, read once per appearance (it cannot change while the keyboard is shown).
+    private var fullAccess = false
+    private var fullAccessHintExpanded = false
+
     private var emojiCatalog: EmojiCatalog?
     private var emojiCatalogLoaded = false
+    /// The emoji search loaded keyword tables (a few MB) that should be freed when leaving the emoji UI.
+    private var emojiSearchUsed = false
     private var sessionEmoji: [String] = []
     private var cards: [StoredCard] = []
     private var unlockedCards: [UUID: (UnlockedCard, Date)] = [:]
     private var feedback: UIImpactFeedbackGenerator?
-    private var lastLayoutRequest: LayoutRequest?
+
+    // render() runs for every key event: layouts, the theme and learned touch offsets are cached.
+    private var layoutCache: [LayoutRequest: KeyboardLayout] = [:]
+    private var settingsGeneration = 0
+    private var userModelGeneration = 0
+    private var cachedTheme: (generation: Int, dark: Bool, theme: KeyboardTheme)?
+    private var cachedOffsets: (id: String, offsets: [String: (dx: Double, dy: Double)])?
 
     private static let barHeight: CGFloat = 44
+    /// An unlocked card stays usable (in memory) for 3 minutes.
+    private static let unlockLifetime: TimeInterval = 180
+    /// Learned words/bigrams reach the engine after this much typing pause.
+    private static let engineRefreshDelay: TimeInterval = 2
 
     // MARK: Lifecycle
 
@@ -43,13 +74,16 @@ final class KeyboardViewController: UIInputViewController {
         settingsDate = store.modificationDate(of: .settings)
         profile = store.loadProfile()
         profileDate = store.modificationDate(of: .profile)
+        userModelDate = store.modificationDate(of: .userModel)
         userModel = store.loadUserModel()
 
         engine = SuggestionEngine { language in
             guard let url = Bundle.main.url(forResource: language.dictionaryID, withExtension: "kbdl", subdirectory: "Dictionaries") else { return nil }
             return try? BinaryLexicon(url: url)
         }
-        applyUserData()
+        engine.setProfile(profile.info)
+        engine.setShortcuts(profile.shortcuts)
+        applyUserModelToEngine(rebuildLexicon: true)
 
         document = ProxyDocument(owner: self)
         let state = store.loadState()
@@ -59,6 +93,7 @@ final class KeyboardViewController: UIInputViewController {
 
         suggestionBar.delegate = self
         keyboardView.delegate = self
+        keyboardView.inputModeTarget = self
         view.addSubview(suggestionBar)
         view.addSubview(keyboardView)
 
@@ -70,28 +105,48 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        fullAccess = hasFullAccess
         reloadIfChanged()
+        purgeExpiredCards()
         cards = settings.cardSuggestions ? CardVault.shared.cards() : []
-        if hasFullAccess, settings.haptics != .off {
+        if fullAccess, settings.haptics != .off {
             let style: UIImpactFeedbackGenerator.FeedbackStyle = settings.haptics == .strong ? .heavy : (settings.haptics == .medium ? .medium : .light)
             feedback = UIImpactFeedbackGenerator(style: style)
             feedback?.prepare()
         } else {
             feedback = nil
         }
-        requestSupplementaryLexicon { [weak self] lexicon in
-            let entries = lexicon.entries.map { (input: $0.userInput, text: $0.documentText) }
-            DispatchQueue.main.async { self?.engine.setSupplementaryLexicon(entries) }
+        // Text replacements and contact names: refreshed at most every 5 minutes, not on every appearance.
+        if lastSupplementaryRequest.map({ Date().timeIntervalSince($0) > 300 }) ?? true {
+            lastSupplementaryRequest = Date()
+            requestSupplementaryLexicon { [weak self] lexicon in
+                let entries = lexicon.entries.map { (input: $0.userInput, text: $0.documentText) }
+                DispatchQueue.main.async { self?.engine.setSupplementaryLexicon(entries) }
+            }
         }
         mode = .keys
+        fullAccessHintExpanded = false
         controller.configure(field: FieldContextMapper.context(for: textDocumentProxy))
         writeState()
         render()
+        scheduleEngineRefresh()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        flushLearning()
+        // A held backspace must not keep deleting once the keyboard goes away.
+        keyboardView.cancelAllTouches()
+        engineRefreshWork?.cancel()
+        engineRefreshWork = nil
+        flushLearning(synchronously: true)
+        releaseEmojiSearchData()
+        purgeExpiredCards()
+    }
+
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        layoutCache.removeAll()
+        if mode != .emoji, mode != .emojiSearch { releaseEmojiSearchData(force: true) }
     }
 
     override func viewDidLayoutSubviews() {
@@ -109,10 +164,6 @@ final class KeyboardViewController: UIInputViewController {
         render()
     }
 
-    override func textWillChange(_ textInput: UITextInput?) {
-        super.textWillChange(textInput)
-    }
-
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         guard controller != nil else { return }
@@ -128,41 +179,104 @@ final class KeyboardViewController: UIInputViewController {
         if sDate != settingsDate {
             settingsDate = sDate
             settings = store.loadSettings()
+            settingsGeneration += 1
             controller?.settings = settings
         }
         let pDate = store.modificationDate(of: .profile)
         if pDate != profileDate {
             profileDate = pDate
             profile = store.loadProfile()
+            engine.setProfile(profile.info)
+            engine.setShortcuts(profile.shortcuts)
+        }
+        // Learned data is only reloaded when the app changed the file: decoding a large model and
+        // rebuilding the user lexicon on every appearance delayed the keyboard and spiked its memory.
+        if store.modificationDate(of: .userModel) != userModelDate {
+            // Pending increments go to disk first (and running writes finish), so the reload contains them.
+            flushLearning(synchronously: true)
+            userModelDate = store.modificationDate(of: .userModel)
             userModel = store.loadUserModel()
-            applyUserData()
-        } else if pendingEvents == 0 {
-            // The app may have edited learned words.
-            userModel = store.loadUserModel()
-            applyUserData()
+            applyUserModelToEngine(rebuildLexicon: true)
         }
     }
 
-    private func applyUserData() {
-        engine.setProfile(profile.info)
-        engine.setShortcuts(profile.shortcuts)
+    /// Hands the in-memory user model to the engine (bigrams, blocked words, language usage) and, when
+    /// asked, rebuilds the user lexicon of known words. Both take tens of milliseconds with a big model.
+    private func applyUserModelToEngine(rebuildLexicon: Bool) {
         engine.setUserModel(userModel)
-        let words = userModel.knownWords()
-        engine.setUserLexicon(words.isEmpty ? nil : InMemoryLexicon(languageID: "user", entries: words))
+        if rebuildLexicon {
+            let words = userModel.knownWords()
+            engine.setUserLexicon(words.isEmpty ? nil : InMemoryLexicon(languageID: "user", entries: words))
+            userLexiconDirty = false
+        }
+        engineNeedsUserModel = false
+        userModelGeneration += 1 // learned touch offsets may have changed
     }
 
-    private func flushLearning() {
-        guard !pendingDelta.isEmpty else { return }
-        store.flush(pendingDelta)
+    /// Records a learning event in the pending delta and the in-memory model.
+    private func noteLearning(_ event: LearningEvent) {
+        var single = UserModelDelta()
+        single.record(event)
+        guard !single.isEmpty else { return }
+        let threshold = LearningPolicy.knownThreshold
+        let wasUnknown = single.words.keys.filter { (userModel.words[$0]?.count ?? 0) < threshold }
+        pendingDelta.record(event)
+        userModel.apply(single)
+        if wasUnknown.contains(where: { (userModel.words[$0]?.count ?? 0) >= threshold }) {
+            userLexiconDirty = true
+        }
+        pendingEvents += 1
+    }
+
+    /// Writes the pending learning delta. Typing flushes run in the background; `synchronously` (keyboard
+    /// disappearing, reload) also waits for writes still running.
+    private func flushLearning(synchronously: Bool = false) {
+        guard !pendingDelta.isEmpty else {
+            if synchronously { flushQueue.sync {} }
+            return
+        }
+        let delta = pendingDelta
         pendingDelta = UserModelDelta()
         pendingEvents = 0
-        let words = userModel.knownWords()
-        engine.setUserLexicon(words.isEmpty ? nil : InMemoryLexicon(languageID: "user", entries: words))
-        engine.setUserModel(userModel)
+        let store = self.store
+        let work = DispatchWorkItem { [weak self] in
+            let before = store.modificationDate(of: .userModel)
+            store.flush(delta)
+            let after = store.modificationDate(of: .userModel)
+            DispatchQueue.main.async { self?.didFlush(before: before, after: after) }
+        }
+        if synchronously {
+            flushQueue.sync(execute: work)
+        } else {
+            flushQueue.async(execute: work)
+        }
+        engineNeedsUserModel = true
+        scheduleEngineRefresh()
+    }
+
+    private func didFlush(before: Date?, after: Date?) {
+        // Our own write: remember its date so the next appearance does not decode the file again. If the
+        // app had changed the file in between, keep the old date so that change is loaded next time.
+        if before == userModelDate { userModelDate = after }
+    }
+
+    /// Refreshes the engine's view of the learned data once typing pauses for a moment, instead of in
+    /// the middle of a keystroke. Called again on every key press, which postpones it while typing.
+    private func scheduleEngineRefresh() {
+        guard engineNeedsUserModel else { return }
+        engineRefreshWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.engineRefreshWork = nil
+            guard self.engineNeedsUserModel else { return }
+            self.applyUserModelToEngine(rebuildLexicon: self.userLexiconDirty)
+        }
+        engineRefreshWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.engineRefreshDelay, execute: work)
     }
 
     private func writeState() {
-        let state = KeyboardRuntimeState(currentLanguage: controller.language, lastActive: Date(), hasFullAccess: hasFullAccess,
+        let state = KeyboardRuntimeState(currentLanguage: controller.language, lastActive: Date(), hasFullAccess: fullAccess,
                                          keyboardVersion: KeibordVersion.display, appGroupIdentifier: AppGroup.resolvedIdentifier)
         store.saveState(state)
     }
@@ -180,38 +294,82 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: Rendering
 
+    private func currentTheme() -> KeyboardTheme {
+        let dark = isDark
+        if let cached = cachedTheme, cached.generation == settingsGeneration, cached.dark == dark { return cached.theme }
+        let theme = KeyboardTheme(settings: settings, dark: dark)
+        cachedTheme = (generation: settingsGeneration, dark: dark, theme: theme)
+        return theme
+    }
+
+    private func layout(for request: LayoutRequest) -> KeyboardLayout {
+        if let cached = layoutCache[request] { return cached }
+        let layout = LayoutFactory.layout(for: request)
+        if layoutCache.count >= 8 { layoutCache.removeAll() }
+        layoutCache[request] = layout
+        return layout
+    }
+
+    private func touchOffsets(for layout: KeyboardLayout) -> (id: String, offsets: [String: (dx: Double, dy: Double)]) {
+        guard settings.adaptiveTouch else { return (id: "off", offsets: [:]) }
+        let id = "\(layout.touchModelKey)#\(userModelGeneration)"
+        if let cached = cachedOffsets, cached.id == id { return cached }
+        let result = (id: id, offsets: userModel.touchOffsets(for: layout.touchModelKey))
+        cachedOffsets = result
+        return result
+    }
+
+    /// Metrics for a page with fewer rows than the keyboard is tall (numbers/symbols next to a letters
+    /// page with a number row): the rows get taller instead of the keyboard changing height.
+    private static func metrics(_ m: KeyboardMetrics, rows: Int, filling target: Int) -> KeyboardMetrics {
+        guard rows > 0, target > rows else { return m }
+        var stretched = m
+        stretched.rowPitch = m.rowPitch * CGFloat(target) / CGFloat(rows)
+        stretched.keyHeight = stretched.rowPitch - (m.rowPitch - m.keyHeight)
+        return stretched
+    }
+
     private func render() {
         guard controller != nil else { return }
-        let theme = KeyboardTheme(settings: settings, dark: isDark)
+        let theme = currentTheme()
         view.backgroundColor = theme.backgroundColor
-        let metrics = KeyboardMetrics.standard(height: settings.appearance.keyHeight, landscape: isLandscape)
+        let baseMetrics = KeyboardMetrics.standard(height: settings.appearance.keyHeight, landscape: isLandscape)
         let field = controller.field
+        let searching = mode == .emojiSearch
+        let numberRow = settings.appearance.showNumberRow && !searching
+        // The emoji panel and the CVV pad take the height of the letter keys they replace.
         let request = LayoutRequest(
             language: controller.language,
             base: settings.baseLayout(for: controller.language),
-            page: mode == .emojiSearch ? .letters : controller.page,
-            variant: mode == .emojiSearch ? .standard : field.layoutVariant,
-            showNumberRow: settings.appearance.showNumberRow && controller.page == .letters && mode == .keys,
-            showLanguageKey: settings.activeLanguages.count > 1 && mode == .keys,
+            page: searching ? .letters : controller.page,
+            variant: searching ? .standard : field.layoutVariant,
+            showNumberRow: numberRow && controller.page == .letters,
+            showLanguageKey: settings.activeLanguages.count > 1 && !searching,
             showGlobeKey: needsInputModeSwitchKey,
             returnKind: field.returnKind
         )
-        let layout = LayoutFactory.layout(for: request)
-        let offsets = settings.adaptiveTouch ? userModel.touchOffsets(for: layout.touchModelKey) : [:]
-        let multiple = settings.activeLanguages.count > 1
-        let spaceLabel = settings.appearance.showSpaceLanguageLabel && multiple ? controller.language.displayName : controller.language.spaceKeyLabel
-        let empty = (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
-        keyboardView.languages = settings.activeLanguages
-        keyboardView.spacebarCursor = settings.spacebarCursor
-        keyboardView.configure(layout: layout, metrics: metrics, theme: theme, shiftState: controller.shiftState,
-                               spaceLabel: spaceLabel, returnEnabled: !(field.enablesReturnKeyAutomatically && empty),
-                               returnProminent: field.returnKind.isProminent, touchOffsets: offsets)
-        lastLayoutRequest = request
-
-        let keysHeight = metrics.keyboardHeight(rows: max(layout.rows.count, 4))
+        let layout = self.layout(for: request)
+        let isPad = request.variant == .numberPad || request.variant == .decimalPad
+        let rows = max(layout.rows.count, isPad ? 4 : (numberRow ? 5 : 4))
+        let keysHeight = baseMetrics.keyboardHeight(rows: rows)
         var total = Self.barHeight + keysHeight
-        if mode == .emojiSearch { total += 44 }
+        if searching { total += Self.barHeight }
         if heightConstraint?.constant != total { heightConstraint?.constant = total }
+
+        if mode == .keys || searching {
+            let offsets = touchOffsets(for: layout)
+            let multiple = settings.activeLanguages.count > 1
+            let spaceLabel = settings.appearance.showSpaceLanguageLabel && multiple ? controller.language.displayName : controller.language.spaceKeyLabel
+            let empty = (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
+            keyboardView.languages = settings.activeLanguages
+            // While searching emoji, keys type into the query: no trackpad, and letters arrive lower-case.
+            keyboardView.spacebarCursor = settings.spacebarCursor && !searching
+            keyboardView.configure(layout: layout, metrics: Self.metrics(baseMetrics, rows: layout.rows.count, filling: rows),
+                                   theme: theme, shiftState: searching ? .off : controller.shiftState,
+                                   spaceLabel: spaceLabel, returnEnabled: !(field.enablesReturnKeyAutomatically && empty),
+                                   returnProminent: field.returnKind.isProminent,
+                                   touchOffsets: offsets.offsets, touchOffsetsID: offsets.id)
+        }
 
         switch mode {
         case .keys:
@@ -234,24 +392,37 @@ final class KeyboardViewController: UIInputViewController {
             suggestionBar.frame = CGRect(x: 0, y: 0, width: b.width, height: Self.barHeight)
             keyboardView.frame = CGRect(x: 0, y: Self.barHeight, width: b.width, height: max(0, b.height - Self.barHeight))
         case .emojiSearch:
-            emojiSearchBar.frame = CGRect(x: 0, y: 0, width: b.width, height: 88)
-            keyboardView.frame = CGRect(x: 0, y: 88, width: b.width, height: max(0, b.height - 88))
+            if emojiSearchBarAdded { emojiSearchBar.frame = CGRect(x: 0, y: 0, width: b.width, height: 2 * Self.barHeight) }
+            keyboardView.frame = CGRect(x: 0, y: 2 * Self.barHeight, width: b.width, height: max(0, b.height - 2 * Self.barHeight))
         case .emoji:
-            emojiPanel.frame = b
+            if emojiPanelAdded { emojiPanel.frame = b }
         case .cardUnlock:
-            cardUnlockView.frame = b
+            if cardUnlockAdded { cardUnlockView.frame = b }
         }
     }
 
     private func updateVisibility() {
         suggestionBar.isHidden = mode != .keys
         keyboardView.isHidden = !(mode == .keys || mode == .emojiSearch)
-        if mode == .emoji, emojiPanel.superview == nil { view.addSubview(emojiPanel); emojiPanel.delegate = self }
-        if mode == .emojiSearch, emojiSearchBar.superview == nil { view.addSubview(emojiSearchBar); emojiSearchBar.delegate = self }
-        if case .cardUnlock = mode, cardUnlockView.superview == nil { view.addSubview(cardUnlockView); cardUnlockView.delegate = self }
-        if emojiPanel.superview != nil { emojiPanel.isHidden = mode != .emoji }
-        if emojiSearchBar.superview != nil { emojiSearchBar.isHidden = mode != .emojiSearch }
-        if cardUnlockView.superview != nil {
+        if mode == .emoji, !emojiPanelAdded {
+            emojiPanelAdded = true
+            emojiPanel.delegate = self
+            view.addSubview(emojiPanel)
+        }
+        if mode == .emojiSearch, !emojiSearchBarAdded {
+            emojiSearchBarAdded = true
+            emojiSearchBar.delegate = self
+            // Below the key area, so the previews and accent menus of the top key row stay visible.
+            view.insertSubview(emojiSearchBar, belowSubview: keyboardView)
+        }
+        if case .cardUnlock = mode, !cardUnlockAdded {
+            cardUnlockAdded = true
+            cardUnlockView.delegate = self
+            view.addSubview(cardUnlockView)
+        }
+        if emojiPanelAdded { emojiPanel.isHidden = mode != .emoji }
+        if emojiSearchBarAdded { emojiSearchBar.isHidden = mode != .emojiSearch }
+        if cardUnlockAdded {
             if case .cardUnlock = mode { cardUnlockView.isHidden = false } else { cardUnlockView.isHidden = true }
         }
     }
@@ -271,10 +442,34 @@ final class KeyboardViewController: UIInputViewController {
             }
             return [Suggestion(text: "", display: text, kind: .action, appendsSpace: false, payload: "switch-keyboard")]
         }
-        if !hasFullAccess, controller.suggestions.isEmpty, controller.currentWord.isEmpty {
-            return [Suggestion(text: "", display: "Allow Full Access for learning & settings", kind: .action, appendsSpace: false, payload: "full-access")]
+        if !fullAccess, controller.suggestions.isEmpty, controller.currentWord.isEmpty {
+            return [Suggestion(text: "", display: fullAccessHintExpanded ? fullAccessInstructions : fullAccessHint,
+                               kind: .action, appendsSpace: false, payload: "full-access")]
         }
         return controller.suggestions
+    }
+
+    private var fullAccessHint: String {
+        switch controller.language.languageCode {
+        case "de": return "Vollen Zugriff erlauben für Lernen & Einstellungen"
+        case "sq": return "Lejo qasjen e plotë për mësim dhe cilësime"
+        case "it": return "Consenti accesso completo per apprendimento e impostazioni"
+        default: return "Allow Full Access for learning & settings"
+        }
+    }
+
+    /// Shown when the hint is tapped (a keyboard extension cannot open Settings itself).
+    private var fullAccessInstructions: String {
+        switch controller.language.languageCode {
+        case "de": return "Einstellungen › Keibord › Tastaturen › Voller Zugriff"
+        case "sq": return "Cilësimet › Keibord › Tastierat › Qasje e plotë"
+        case "it": return "Impostazioni › Keibord › Tastiere › Accesso completo"
+        default: return "Settings › Keibord › Keyboards › Allow Full Access"
+        }
+    }
+
+    private func showBarMessage(_ message: String) {
+        suggestionBar.update([Suggestion(text: "", display: message, kind: .action, appendsSpace: false)], theme: currentTheme())
     }
 
     // MARK: Emoji
@@ -298,6 +493,16 @@ final class KeyboardViewController: UIInputViewController {
         return emojiCatalog
     }
 
+    /// Frees the emoji catalog once its keyword tables were loaded by a search (the extension's memory
+    /// limit is tight); the panel loads it again when it is next opened.
+    private func releaseEmojiSearchData(force: Bool = false) {
+        guard emojiSearchUsed || force else { return }
+        emojiSearchUsed = false
+        emojiCatalog = nil
+        emojiCatalogLoaded = false
+        if emojiPanelAdded { emojiPanel.releaseData() }
+    }
+
     private var emojiRecents: [String] {
         var result = sessionEmoji
         for e in userModel.emojiRecents where !result.contains(e) { result.append(e) }
@@ -312,17 +517,20 @@ final class KeyboardViewController: UIInputViewController {
         controller.handle(.insertText(emoji, commitsWord: true))
         sessionEmoji.removeAll { $0 == emoji }
         sessionEmoji.insert(emoji, at: 0)
-        pendingDelta.record(.usedEmoji(emoji))
-        var single = UserModelDelta()
-        single.record(.usedEmoji(emoji))
-        userModel.apply(single)
-        pendingEvents += 1
+        // Incognito pauses all learning, emoji recents included (they stay for this session only).
+        if !settings.incognito { noteLearning(.usedEmoji(emoji)) }
         playFeedback(sound: 1104)
     }
 
     private func updateEmojiSearch(_ query: String) {
-        let codes = Array(Set(settings.activeLanguages.map { $0.emojiKeywordCode } + ["en"]))
-        let results = query.isEmpty ? emojiRecents : (loadCatalog()?.search(query, languageCodes: codes, limit: 40) ?? [])
+        let codes = Array(Set(settings.activeLanguages.map { $0.emojiKeywordCode } + ["en"])).sorted()
+        let results: [String]
+        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            results = emojiRecents
+        } else {
+            emojiSearchUsed = true
+            results = loadCatalog()?.search(query, languageCodes: codes, limit: 40) ?? []
+        }
         emojiSearchBar.setQuery(query, results: results)
     }
 
@@ -348,8 +556,15 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    /// Drops unlocked cards older than 3 minutes, so decrypted numbers do not stay in memory.
+    private func purgeExpiredCards() {
+        let now = Date()
+        unlockedCards = unlockedCards.filter { now.timeIntervalSince($0.value.1) < Self.unlockLifetime }
+    }
+
     private func useCard(id: UUID) {
-        if let cached = unlockedCards[id], Date().timeIntervalSince(cached.1) < 180 {
+        purgeExpiredCards()
+        if let cached = unlockedCards[id] {
             fill(card: cached.0)
             return
         }
@@ -357,7 +572,7 @@ final class KeyboardViewController: UIInputViewController {
         if card.requiresCVV {
             mode = .cardUnlock(id)
             updateVisibility()
-            cardUnlockView.configure(title: cvvTitle(card), cvvLength: card.brand.cvvLength, theme: KeyboardTheme(settings: settings, dark: isDark))
+            cardUnlockView.configure(title: cvvTitle(card), cvvLength: card.brand.cvvLength, theme: currentTheme())
             layoutChildren()
             return
         }
@@ -366,7 +581,7 @@ final class KeyboardViewController: UIInputViewController {
             unlockedCards[id] = (unlocked, Date())
             fill(card: unlocked)
         } catch {
-            suggestionBar.update([Suggestion(text: "", display: error.localizedDescription, kind: .action, appendsSpace: false)], theme: KeyboardTheme(settings: settings, dark: isDark))
+            showBarMessage(error.localizedDescription)
         }
     }
 
@@ -382,9 +597,18 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: Feedback
 
     private func playFeedback(sound: SystemSoundID) {
-        guard hasFullAccess else { return }
-        feedback?.impactOccurred()
+        guard fullAccess else { return }
+        if let feedback = feedback {
+            feedback.impactOccurred()
+            // Keeps the Taptic Engine ready, so the next key press has no haptic lag.
+            feedback.prepare()
+        }
         if settings.keySound { AudioServicesPlaySystemSound(sound) }
+    }
+
+    private static func sound(for key: KeySpec) -> SystemSoundID {
+        if key.action == .backspace { return 1155 }
+        return key.style == .character || key.style == .space ? 1104 : 1156
     }
 }
 
@@ -404,25 +628,23 @@ extension KeyboardViewController: LearningSink {
             return
         }
         guard settings.learningEnabled else { return }
-        pendingDelta.record(event)
-        var single = UserModelDelta()
-        single.record(event)
-        userModel.apply(single)
-        pendingEvents += 1
+        noteLearning(event)
         if pendingEvents >= 25 { flushLearning() }
     }
 }
 
 extension KeyboardViewController: KeyboardViewDelegate {
     func keyboardView(_ view: KeyboardView, didTrigger event: KeyboardViewEvent) {
+        if case .keyDown = event, engineRefreshWork != nil {
+            scheduleEngineRefresh() // still typing: postpone the engine refresh
+        }
         if mode == .emojiSearch {
             handleSearchKey(event)
             return
         }
         switch event {
         case .keyDown(let key):
-            let sound: SystemSoundID = key.action == .backspace ? 1155 : (key.style == .character || key.style == .space ? 1104 : 1156)
-            playFeedback(sound: sound)
+            playFeedback(sound: Self.sound(for: key))
         case let .character(text, tap, isLetter):
             controller.handle(.character(text, tap: tap, isLetter: isLetter))
         case .backspace: controller.handle(.backspace)
@@ -456,11 +678,14 @@ extension KeyboardViewController: KeyboardViewDelegate {
     private func handleSearchKey(_ event: KeyboardViewEvent) {
         var query = emojiSearchBar.query
         switch event {
-        case .keyDown:
-            playFeedback(sound: 1104)
+        case .keyDown(let key):
+            playFeedback(sound: Self.sound(for: key))
             return
         case .character(let text, _, _): query += text
-        case .backspace, .backspaceRepeat: if !query.isEmpty { query.removeLast() }
+        case .backspace: if !query.isEmpty { query.removeLast() }
+        case .backspaceRepeat:
+            if !query.isEmpty { query.removeLast() }
+            playFeedback(sound: 1155)
         case .space: query += " "
         case .returnKey, .emoji:
             mode = .emoji
@@ -480,7 +705,12 @@ extension KeyboardViewController: SuggestionBarDelegate {
         case .card:
             if let id = suggestion.payload.flatMap(UUID.init(uuidString:)) { useCard(id: id) }
         case .action:
-            if suggestion.payload == "switch-keyboard" { advanceToNextInputMode() }
+            if suggestion.payload == "switch-keyboard" {
+                advanceToNextInputMode()
+            } else if suggestion.payload == "full-access" {
+                fullAccessHintExpanded.toggle()
+                render()
+            }
         default:
             controller.handle(.suggestion(suggestion))
         }
@@ -497,6 +727,7 @@ extension KeyboardViewController: EmojiPanelDelegate {
 
     func emojiPanelDidTapABC(_ panel: EmojiPanelView) {
         mode = .keys
+        releaseEmojiSearchData()
         controller.refreshSuggestions()
         render()
     }
@@ -529,10 +760,13 @@ extension KeyboardViewController: CardUnlockViewDelegate {
             render()
             fill(card: unlocked)
         } catch {
-            view.showError(error.localizedDescription)
+            let message = error.localizedDescription
+            view.showError(message)
             if (error as? CardVaultError) == .lockedOut {
                 mode = .keys
                 render()
+                // The unlock view is gone: keep the reason visible in the bar.
+                showBarMessage(message)
             }
         }
     }
