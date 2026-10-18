@@ -168,7 +168,10 @@ final class KeyboardView: UIView {
         var timer: Timer?
         let order: Int
         var lastX: CGFloat = 0
-        var cursorRemainder: CGFloat = 0
+        /// Trackpad: finger x where it started and the cursor steps sent since, so moving back to a
+        /// spot always puts the cursor back where it was there.
+        var trackpadOriginX: CGFloat = 0
+        var cursorSteps = 0
         var repeatTicks = 0
         init(frameIndex: Int, key: KeySpec, tap: TapInput?, order: Int) {
             self.frameIndex = frameIndex
@@ -488,7 +491,8 @@ final class KeyboardView: UIView {
         case .space:
             t.mode = .trackpad
             // Measure the drag from where the finger is now, not from where it first touched.
-            t.cursorRemainder = 0
+            t.trackpadOriginX = t.lastX
+            t.cursorSteps = 0
             popup.isHidden = true
             trackpadActive = true
             delegate?.keyboardView(self, didTrigger: .trackpad(true))
@@ -514,12 +518,13 @@ final class KeyboardView: UIView {
             let point = touch.location(in: self)
             switch t.mode {
             case .trackpad:
-                t.cursorRemainder += point.x - t.lastX
                 t.lastX = point.x
-                let step = KeyTiming.trackpadStep
-                let n = Int(t.cursorRemainder / step)
+                // Steps from the start, truncated towards zero (symmetric). Carrying a remainder instead
+                // drifted: +20 pt then back to +2 pt moved the cursor +2, -1.
+                let target = Int((point.x - t.trackpadOriginX) / KeyTiming.trackpadStep)
+                let n = target - t.cursorSteps
                 if n != 0 {
-                    t.cursorRemainder -= CGFloat(n) * step
+                    t.cursorSteps = target
                     delegate?.keyboardView(self, didTrigger: .moveCursor(n))
                 }
             case .callout:
