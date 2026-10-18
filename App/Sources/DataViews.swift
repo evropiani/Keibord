@@ -578,10 +578,11 @@ struct DataView: View {
                 pendingPayload = payload
                 askMode = true
             case .failure(let error):
-                if (error as? BackupError) == .wrongPassword {
+                let backupError = error as? BackupError
+                if backupError == .wrongPassword || backupError == .passwordRequired {
                     // Ask again instead of making the user pick the file again.
                     importPassword = ""
-                    passwordWasWrong = true
+                    passwordWasWrong = backupError == .wrongPassword
                     askPassword = true
                 } else {
                     importData = nil
