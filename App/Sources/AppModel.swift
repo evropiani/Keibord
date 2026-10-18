@@ -213,10 +213,12 @@ final class AppModel: ObservableObject {
         let version = KeibordVersion.display
         let store = self.store
         performInBackground {
-            let payload = BackupPayload(createdAt: Date(), appVersion: version, settings: settings,
-                                        profile: profile, userModel: store.loadUserModel())
             let result: Result<Data, Error> = Result {
-                try BackupFile.encode(payload, password: password, cipher: PasswordBackupCipher())
+                // Never export an empty model in place of learned data that merely cannot be read now.
+                guard let userModel = store.loadUserModelIfReadable() else { throw AppModelError.learnedDataUnreadable }
+                let payload = BackupPayload(createdAt: Date(), appVersion: version, settings: settings,
+                                            profile: profile, userModel: userModel)
+                return try BackupFile.encode(payload, password: password, cipher: PasswordBackupCipher())
             }
             DispatchQueue.main.async { completion(result) }
         }
@@ -292,6 +294,16 @@ final class AppModel: ObservableObject {
                 if self.pendingUserModelChanges == 0 { self.publish(UserModel(), (learned: [], blocked: []), date: date) }
                 completion?()
             }
+        }
+    }
+}
+
+enum AppModelError: LocalizedError {
+    case learnedDataUnreadable
+
+    var errorDescription: String? {
+        switch self {
+        case .learnedDataUnreadable: return "The learned words cannot be read right now. Unlock your iPhone and try again."
         }
     }
 }

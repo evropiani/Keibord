@@ -172,6 +172,23 @@ final class KeibordStore {
         read(UserModel.self, .userModel) ?? UserModel()
     }
 
+    /// Like `loadUserModel`, but nil when the file exists and cannot be read right now (data protection,
+    /// I/O error, coordination failure), where an empty model would be mistaken for the real one (e.g. an
+    /// export that silently contains no learned words). A missing file is an empty model; an undecodable
+    /// one too (its bytes are kept aside by the next write).
+    func loadUserModelIfReadable() -> UserModel? {
+        var result: UserModel?
+        var error: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: url(.userModel), options: [], error: &error) { u in
+            switch Self.load(UserModel.self, at: u) {
+            case .missing, .corrupt: result = UserModel()
+            case .loaded(let model): result = model
+            case .unreadable: result = nil
+            }
+        }
+        return result
+    }
+
     /// Replaces the learned data (reset / import replace). Learning edits go through `updateUserModel`.
     @discardableResult func saveUserModel(_ m: UserModel) -> Bool { write(m, .userModel) }
 
