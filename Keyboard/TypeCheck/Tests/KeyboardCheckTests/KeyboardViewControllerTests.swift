@@ -92,6 +92,35 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(keyView("a")?.label.text, "a")
     }
 
+    func testTypingDoesNotRebuildKeyViews() {
+        start()
+        let a = keyView("a"), space = keyView("space")
+        XCTAssertNotNil(a)
+        type("hallo du ")
+        send(.shift)
+        send(.backspace)
+        XCTAssertTrue(keyView("a") === a, "letters, shift and backspace keep the key views")
+        XCTAssertTrue(keyView("space") === space)
+        send(.switchPage(.numbers))
+        XCTAssertNil(keyView("a"))
+        send(.switchPage(.letters))
+        XCTAssertFalse(keyView("a") === a, "a page change builds the keys anew")
+    }
+
+    func testSettingsChangedByTheAppApplyOnTheNextAppearance() {
+        start()
+        XCTAssertEqual(keyboard.layout?.rows.count, 4)
+        vc.viewWillDisappear(false)
+        var settings = KeibordSettings()
+        settings.appearance.showNumberRow = true
+        settings.enabledLanguages = [.enGB]
+        KeibordStore.shared.saveSettings(settings)
+        vc.viewWillAppear(false)
+        XCTAssertEqual(keyboard.layout?.rows.count, 5)
+        XCTAssertEqual(keyboard.layout?.language, .enGB, "a language that is no longer enabled is left")
+        XCTAssertNil(keyView("language"), "no language key with one language")
+    }
+
     func testRolloverThroughTheControllerReturnsToLettersBeforeTheNextKey() {
         start()
         send(.switchPage(.numbers))
