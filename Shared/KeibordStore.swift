@@ -92,8 +92,14 @@ final class KeibordStore {
         NSFileCoordinator().coordinate(writingItemAt: url(.userModel), options: .forMerging, error: &error) { u in
             var model = UserModel()
             if let data = try? Data(contentsOf: u) {
-                guard let decoded = try? KeibordJSON.decoder().decode(UserModel.self, from: data) else { return }
-                model = decoded
+                if let decoded = try? KeibordJSON.decoder().decode(UserModel.self, from: data) {
+                    model = decoded
+                } else {
+                    // Unreadable file: keep a copy aside and start over. Returning here (as before) made
+                    // every later flush fail silently, so the keyboard never saved learning again.
+                    let aside = directory.appendingPathComponent("user-model.corrupt-\(Int(Date().timeIntervalSince1970)).json")
+                    try? data.write(to: aside)
+                }
             }
             transform(&model)
             model.prune()
