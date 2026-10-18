@@ -38,6 +38,10 @@ final class KeyboardViewController: UIInputViewController {
     private let flushQueue = DispatchQueue(label: "com.keibord.keyboard.learning", qos: .utility)
     /// The engine has not seen the latest learned words/bigrams yet; refreshed when typing pauses.
     private var engineNeedsUserModel = false
+    /// False while user-model.json is being loaded in the background (launch, or after the app changed it).
+    private var userModelLoaded = false
+    /// Learning recorded while loading: applied on top of the loaded model, which does not contain it.
+    private var preloadIncrements: [UserModelDelta] = []
     /// A word became "known" since the user lexicon was last built.
     private var userLexiconDirty = false
     private var engineRefreshToken = 0
@@ -81,8 +85,6 @@ final class KeyboardViewController: UIInputViewController {
         settingsDate = store.modificationDate(of: .settings)
         profile = store.loadProfile()
         profileDate = store.modificationDate(of: .profile)
-        userModelDate = store.modificationDate(of: .userModel)
-        userModel = store.loadUserModel()
 
         engine = SuggestionEngine { language in
             guard let url = Bundle.main.url(forResource: language.dictionaryID, withExtension: "kbdl", subdirectory: "Dictionaries") else { return nil }
@@ -90,7 +92,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         engine.setProfile(profile.info)
         engine.setShortcuts(profile.shortcuts)
-        applyUserModelToEngine(rebuildLexicon: true)
+        loadUserModelInBackground()
 
         document = ProxyDocument(owner: self)
         let state = store.loadState()
@@ -219,13 +221,49 @@ final class KeyboardViewController: UIInputViewController {
         }
         // Learned data is only reloaded when the app changed the file: decoding a large model and
         // rebuilding the user lexicon on every appearance delayed the keyboard and spiked its memory.
-        if store.modificationDate(of: .userModel) != userModelDate {
-            // Pending increments go to disk first (and running writes finish), so the reload contains them.
-            flushLearning(synchronously: true)
-            userModelDate = store.modificationDate(of: .userModel)
-            userModel = store.loadUserModel()
+        if userModelLoaded, store.modificationDate(of: .userModel) != userModelDate {
+            // Pending increments go to disk first; the reload, queued after that write, contains them.
+            flushLearning()
+            loadUserModelInBackground()
+        }
+    }
+
+    /// Decodes user-model.json and builds the user lexicon on the learning queue. On the main thread
+    /// this took a few hundred milliseconds with a big model before the keyboard could first draw.
+    private func loadUserModelInBackground() {
+        userModelLoaded = false
+        preloadIncrements = []
+        let store = self.store
+        flushQueue.async {
+            let date = store.modificationDate(of: .userModel)
+            let model = store.loadUserModel()
+            let words = model.knownWords()
+            let lexicon: InMemoryLexicon? = words.isEmpty ? nil : InMemoryLexicon(languageID: "user", entries: words)
+            DispatchQueue.main.async { [weak self] in
+                self?.didLoadUserModel(model, lexicon: lexicon, date: date)
+            }
+        }
+    }
+
+    private func didLoadUserModel(_ loaded: UserModel, lexicon: InMemoryLexicon?, date: Date?) {
+        var model = loaded
+        for increments in preloadIncrements { model.apply(increments) }
+        userModel = model
+        // Flushes queued after the load report this date as their "before", so they are recognised as ours.
+        userModelDate = date
+        userModelLoaded = true
+        if preloadIncrements.isEmpty {
+            engine.setUserModel(userModel)
+            engine.setUserLexicon(lexicon)
+            userLexiconDirty = false
+            engineNeedsUserModel = false
+            userModelGeneration += 1 // learned touch offsets
+        } else {
             applyUserModelToEngine(rebuildLexicon: true)
         }
+        preloadIncrements = []
+        controller.refreshSuggestions()
+        render()
     }
 
     /// Hands the in-memory user model to the engine (bigrams, blocked words, language usage) and, when
@@ -252,6 +290,7 @@ final class KeyboardViewController: UIInputViewController {
         let threshold = LearningPolicy.knownThreshold
         let wasUnknown = increments.words.keys.filter { (userModel.words[$0]?.count ?? 0) < threshold }
         userModel.apply(increments)
+        if !userModelLoaded { preloadIncrements.append(increments) }
         if wasUnknown.contains(where: { (userModel.words[$0]?.count ?? 0) >= threshold }) {
             userLexiconDirty = true
             if case .rejectedCorrection = event {
@@ -308,7 +347,8 @@ final class KeyboardViewController: UIInputViewController {
             // Superseded by a later key press (or cancelled by viewWillDisappear).
             guard let self = self, self.engineRefreshToken == token else { return }
             self.engineRefreshPending = false
-            guard self.engineNeedsUserModel else { return }
+            // While loading, the loaded model goes to the engine anyway (didLoadUserModel).
+            guard self.engineNeedsUserModel, self.userModelLoaded else { return }
             self.applyUserModelToEngine(rebuildLexicon: self.userLexiconDirty)
         }
     }

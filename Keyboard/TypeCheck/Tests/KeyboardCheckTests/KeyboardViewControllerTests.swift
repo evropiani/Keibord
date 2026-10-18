@@ -50,6 +50,7 @@ final class KeyboardViewControllerTests: XCTestCase {
     override func setUp() {
         super.setUp()
         KeibordStore.shared.saveSettings(KeibordSettings())
+        KeibordStore.shared.saveUserModel(UserModel())
         CardVault.shared.testCards = []
     }
 
@@ -177,6 +178,57 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(proxy.cursor, 3)
         type("x")
         XCTAssertEqual(proxy.text, "Halxlo ")
+    }
+
+    // MARK: Learning
+
+    func testLearnedWordsLoadInTheBackgroundAndReachTheSuggestions() {
+        var model = UserModel()
+        model.words["leiwand"] = LearnedWord(count: 5, lastUsedDay: 20_000, language: "de-AT")
+        KeibordStore.shared.saveUserModel(model)
+        start()
+        wait(0.3) // the background load
+        type("leiw")
+        XCTAssertTrue(barTitles.contains { $0.lowercased() == "leiwand" }, "\(barTitles)")
+    }
+
+    func testWordsLearnedWhileLoadingAreKept() {
+        KeibordStore.shared.saveUserModel(UserModel())
+        start()
+        type("zzwort zzwort ") // before the load finished: twice makes it a known word
+        wait(0.3)
+        type("zzw")
+        XCTAssertTrue(barTitles.contains { $0.lowercased() == "zzwort" }, "\(barTitles)")
+    }
+
+    func testLearningIsFlushedWhenTheKeyboardGoesAway() {
+        KeibordStore.shared.saveUserModel(UserModel())
+        start()
+        wait(0.3)
+        type("servus oida ")
+        vc.viewWillDisappear(false)
+        let saved = KeibordStore.shared.loadUserModel()
+        XCTAssertEqual(saved.words["oida"]?.count, 1)
+        XCTAssertEqual(saved.bigrams[UserModel.bigramKey("Servus", "oida")] ?? saved.bigrams[UserModel.bigramKey("servus", "oida")], 1)
+    }
+
+    func testModelChangedByTheAppIsReloadedOnTheNextAppearance() {
+        start()
+        wait(0.3)
+        type("servus ")
+        vc.viewWillDisappear(false)
+        // The app adds a word in its dictionary editor while the keyboard is away.
+        KeibordStore.shared.updateUserModel { $0.addWord("neuwort") }
+        type("oida ") // learned after the flush, still pending when the keyboard comes back
+        vc.viewWillAppear(false)
+        wait(0.3)
+        type("neuw")
+        XCTAssertTrue(barTitles.contains { $0.lowercased() == "neuwort" }, "\(barTitles)")
+        vc.viewWillDisappear(false)
+        let saved = KeibordStore.shared.loadUserModel()
+        XCTAssertNotNil(saved.words["neuwort"])
+        XCTAssertNotNil(saved.words["Servus"] ?? saved.words["servus"])
+        XCTAssertEqual(saved.words["oida"]?.count, 1)
     }
 
     // MARK: Suggestion bar
