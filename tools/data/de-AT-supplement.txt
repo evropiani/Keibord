@@ -353,7 +353,14 @@ gschmackig 2.0
 Bub 3.6
 Buben 3.5
 
-# Places
+# Places (the subtitle corpus is mostly German-German: "Österreich" 3.6 vs "Deutschland" 4.4)
+Österreich 4.5
+Österreicher 3.6
+Österreicherin 3.0
+österreichisch 3.0
+österreichische 3.3
+österreichischen 3.4
+österreichischer 3.0
 Wien 4.5
 Wiener 4.0
 Wienerin 2.6

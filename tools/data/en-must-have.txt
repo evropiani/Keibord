@@ -60,7 +60,6 @@ please 5.5
 thanks 5
 sorry 5.5
 okay 5.5
-ok 4.5
 OK 4.5
 hello 5
 hi 5
@@ -184,7 +183,7 @@ money 5.5
 car 5
 phone 5
 message 4.5
-email 4
+email 3.5
 friend 5.5
 family 5
 mother 5.5
@@ -217,13 +216,13 @@ party 5
 birthday 4.5
 holiday 4
 weather 4
-Monday 4.5
+Monday 4
 Tuesday 4
 Wednesday 4
 Thursday 4
-Friday 4.5
-Saturday 4.5
-Sunday 4.5
+Friday 4
+Saturday 4
+Sunday 4
 January 3.5
 December 3.5
 Christmas 4.5
@@ -231,7 +230,7 @@ God 5
 London 4.5
 England 4.5
 America 4.5
-English 5
+English 4.5
 Mr 5
 Mrs 4.5
 

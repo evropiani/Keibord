@@ -6,7 +6,7 @@
     python3 tools/build_dictionaries.py --verify        # only re-read and check the committed files
     python3 tools/build_dictionaries.py --dump DIR      # also write DIR/<id>.tsv (id, word, zipf, source)
 
-Pipeline per dictionary (see tools/README.md for sources and licenses):
+Pipeline per dictionary (sources and licenses: docs/ARCHITECTURE.md section 3, README.md):
   1. Corpus frequencies: OpenSubtitles 2018 word counts (hermitdave/FrequencyWords), lower-cased.
      zipf = log10(count / total * 1e9) with total = sum of all counts in the full list.
   2. Spelling + casing with Hunspell (LibreOffice dictionaries) through libhunspell (ctypes; the
@@ -14,18 +14,31 @@ Pipeline per dictionary (see tools/README.md for sources and licenses):
      {lower, Capitalised, UPPER (len <= 4)} are kept. Hunspell accepts "Gehen"/"HAUS" for any valid
      lower-case word, so a Capitalised/UPPER form counts only if a copy of the dictionary
      restricted to capitalised/upper-case stems accepts it.
-  3. Spelling variants: the counts of words that are (mostly) misspellings move to the word they
+  3. Casing twins ("zeit"/"Zeit", "god"/"God") share the case-folded count. The main casing keeps
+     it and the other one is penalised: a Capitalised form is the main one when Google Books lists
+     it capitalised (1grams: >= 92 % capitalised), when German 2grams show it capitalised in
+     mid-sentence ("die Frage"), when the other English variant knows it only as a proper noun
+     ("york" -> "York") or when it is listed (Italian "Dio"). Capitalised German verbs that the
+     2grams never show capitalised ("Haben") get the same penalty.
+  4. Spelling variants: the counts of words that are (mostly) misspellings move to the word they
      spell and the misspelling is left out, so the keyboard corrects it: diacritic-less spellings
      ("eshte" -> "është", "perche'" -> "perché"; for Albanian/Italian also Hunspell-valid forms
      that are far rarer than their accented twin, "shume" -> "shumë", "cosi" -> "così"), Swiss
      "ss" ("strasse"), English contractions without apostrophe ("dont"), subtitle OCR errors
-     ("lch" -> "ich") and the spellings listed in the supplements.
-  4. Frequent words rejected by Hunspell are kept (okay, handy, slang) when plausible.
-  5. Extras: English contractions (tools/data/en-contractions.txt), Italian elisions ("dell'"),
+     ("lch" -> "ich"), the other English variant's spelling ("favorite" -> "favourite" in en-GB)
+     and the spellings listed in the supplements and reject lists (tools/data/<id>-reject.txt).
+  5. Frequent words rejected by Hunspell are kept when plausible (okay, handy, Austrian "oje",
+     "ned"), but not names and English lines from the same films: words about as frequent in the
+     other subtitle corpora ("danny", "lorelai"), English Hunspell words, the reject lists. English
+     keeps only names its other variant knows and the words in tools/data/en-kept.txt.
+  6. Extras: English contractions (tools/data/en-contractions.txt), Italian elisions ("dell'"),
      the supplements (tools/data/<id>-supplement.txt) and Hunspell-only stems at zipf 0.8.
-  6. Bigrams from Google Books 2grams (orgtre/google-books-ngram-frequency):
-     P(next | prev) = c(prev next) / c(prev), with 1grams as denominators.
-  7. The most frequent words that fit into the budget (word count and file size) are written.
+  7. Bigrams from Google Books 2grams (orgtre/google-books-ngram-frequency):
+     P(next | prev) = c(prev next) / c(prev), with 1grams as denominators, plus conversational
+     pairs the books miss (tools/data/<id>-bigrams.txt). Albanian has no bigram source.
+  8. The most frequent words that fit into the budget (word count and file size) are written.
+  9. --verify re-reads the files and checks them, including the must-have lists
+     (tools/data/<id>-must-have.txt: everyday words with their main casing and minimum zipf).
 Output is deterministic: the same inputs always produce identical bytes.
 """
 
@@ -77,6 +90,17 @@ ENGLISH_LOANWORDS = frozenset({
     "drink", "bravo", "mama", "papa", "shopping", "fitness", "handy", "camping", "manager", "trailer",
 })
 GERMAN_FUNCTION_WORD_RANK = 300
+# Zipf penalty for the lower-case twin of a German word whose Capitalised form is the main one
+# ("zeit" next to "Zeit"): Google Books lists a word capitalised when >= 92 % of it is.
+GERMAN_TWIN_PENALTY = 1.0
+# ... or when at least this share of its uses as the second word of a Google Books 2gram (never at a
+# sentence start) is capitalised ("die Frage", "an der Stelle"; "ich frage" is rarer). The same
+# share in lower case gives the Capitalised twin that penalty ("zu haben": "Haben" is rare).
+GERMAN_MID_SENTENCE_SHARE = 0.9
+# An unknown word whose relative frequency in the other subtitle corpora (summed) is at least this
+# share of its relative frequency in its own corpus is a name or English from the same films and
+# series ("danny", "lorelai"); colloquial forms ("schnapp", "vabbè", "plako") are near 0.
+FOREIGN_SHARE = 0.25
 MIN_LOG2_BIGRAM = -8.0
 
 
@@ -89,6 +113,7 @@ class Language:
     singles: frozenset              # one-letter words that are kept (exact forms)
     max_words: int
     ngrams: str | None = None       # google-books-ngram-frequency language
+    bigram_supplement: str | None = None  # conversational pairs the books miss ("gute Nacht")
     sibling: str | None = None      # hunspell of a sibling variant (en-GB <-> en-US)
     min_count: int = 2              # ignore corpus words seen fewer times
     capital_penalty: float = 1.5    # zipf penalty for a Capitalised/UPPER duplicate of a valid word
@@ -98,15 +123,19 @@ class Language:
     contractions: str | None = None
     supplement: str | None = None
     forced_caps: tuple = ()         # Capitalised forms Hunspell does not list on their own ("Sie")
+    dominant_caps: tuple = ()       # Capitalised forms that are the main casing of their key ("Dio")
     keep_duplicates: tuple = ()     # Capitalised/UPPER twins of very frequent words that are kept ("US")
     # Hunspell-valid diacritic-free words are dropped as misspellings when their accented twin is
     # at least `respell_ratio` times as frequent (and seen at least `respell_min_count` times).
     respell_ratio: float | None = None
     respell_min_count: int = 0
     respell_keep: frozenset = frozenset()
+    kept_list: str | None = None    # unknown corpus words are kept only when listed here (with casing)
+    reject: str | None = None       # corpus words to leave out, optionally respelled ("xhon", "regull rregull")
     # Sloppy spellings of words Hunspell rejects: a dropped final letter ("goin") and letter swaps.
     sloppy_suffix: str = ""
     sloppy_swaps: tuple = ()
+    must_have: str | None = None    # --verify: everyday words with their main casing and minimum zipf
     known: list = field(default_factory=list)      # words Hunspell must accept (conversion check)
     required: list = field(default_factory=list)   # --verify: must be in the file with this casing
     forbidden: list = field(default_factory=list)  # --verify: must not be in the file
@@ -120,7 +149,8 @@ LANGUAGES = {
     "de-AT": Language(
         id="de-AT", corpus="de", hunspell="de/de_AT_frami", letters="abcdefghijklmnopqrstuvwxyzäöüß",
         singles=frozenset(), max_words=MAX_WORDS, ngrams="german", german_casing=True, allow_triples=True,
-        supplement="de-AT-supplement.txt",
+        bigram_supplement="de-AT-bigrams.txt",
+        supplement="de-AT-supplement.txt", reject="de-AT-reject.txt", must_have="de-AT-must-have.txt",
         forced_caps=("Sie", "Ihnen", "Ihr", "Ihre", "Ihren", "Ihrem", "Ihrer", "Ihres"),
         known=["Haus", "Straße", "für", "schön", "Jänner"],
         required=["Haus", "Straße", "für", "schön", "ich", "Jänner", "Feber", "heuer", "Paradeiser",
@@ -130,22 +160,26 @@ LANGUAGES = {
     "en-GB": Language(
         id="en-GB", corpus="en", hunspell="en/en_GB", letters="abcdefghijklmnopqrstuvwxyz",
         singles=frozenset({"a", "I"}), max_words=150_000, ngrams="english", sibling="en/en_US",
-        contractions="en-contractions.txt", supplement="en-supplement.txt",
-        keep_duplicates=("US", "May", "God"), sloppy_suffix="g",
-        known=["the", "colour", "London", "don't"],
+        bigram_supplement="en-bigrams.txt",
+        contractions="en-contractions.txt", supplement="en-supplement.txt", kept_list="en-kept.txt",
+        reject="en-GB-reject.txt", must_have="en-must-have.txt", keep_duplicates=("US", "May", "God"),
+        sloppy_suffix="g", known=["the", "colour", "London", "don't"],
         required=ENGLISH_REQUIRED + ["colour", "favourite"],
         forbidden=ENGLISH_FORBIDDEN + ["color", "favorite"]),
     "en-US": Language(
         id="en-US", corpus="en", hunspell="en/en_US", letters="abcdefghijklmnopqrstuvwxyz",
         singles=frozenset({"a", "I"}), max_words=150_000, ngrams="english", sibling="en/en_GB",
-        contractions="en-contractions.txt", supplement="en-supplement.txt",
-        keep_duplicates=("US", "May", "God"), sloppy_suffix="g",
+        bigram_supplement="en-bigrams.txt",
+        contractions="en-contractions.txt", supplement="en-supplement.txt", kept_list="en-kept.txt",
+        must_have="en-must-have.txt", keep_duplicates=("US", "May", "God"), sloppy_suffix="g",
         known=["the", "color", "London", "don't"],
         required=ENGLISH_REQUIRED + ["color", "favorite"],
         forbidden=ENGLISH_FORBIDDEN + ["colour", "favourite"]),
     "it": Language(
         id="it", corpus="it", hunspell="it_IT/it_IT", letters="abcdefghijklmnopqrstuvwxyzàèéìòù",
         singles=frozenset({"a", "e", "è", "i", "o"}), max_words=150_000, ngrams="italian", elisions=True,
+        reject="it-reject.txt", must_have="it-must-have.txt", dominant_caps=("Dio",),
+        bigram_supplement="it-bigrams.txt",
         respell_ratio=0.8, respell_min_count=300,
         respell_keep=frozenset({"papa", "meta", "senno", "necessita"}),
         known=["perché", "città", "caffè", "l'amico"],
@@ -155,6 +189,7 @@ LANGUAGES = {
     "sq": Language(
         id="sq", corpus="sq", hunspell="sq_AL/sq_AL", letters="abcdefghijklmnopqrstuvwxyzçë",
         singles=frozenset({"a", "e", "i", "o", "u"}), max_words=150_000, supplement="sq-supplement.txt",
+        reject="sq-reject.txt", must_have="sq-must-have.txt",
         respell_ratio=3.0, respell_keep=frozenset({"te", "ne"}),
         sloppy_suffix="ë", sloppy_swaps=(("q", "ç"),),
         known=["është", "një", "çfarë", "Kosovë"],
@@ -174,7 +209,35 @@ ITALIAN_FINAL_ACCENTS = {"a": "à", "e": "èé", "i": "ì", "o": "ò", "u": "ù"
 ITALIAN_ELISION_PROBES = ["anno", "uomo", "amico", "altra", "idea", "ora", "essere", "è", "era", "ho",
                           "hai", "ha", "hanno", "erano", "io", "eri", "inizio", "ultimo", "una"]
 TRIPLE = re.compile(r"(.)\1\1")
+# British <-> American spelling differences, tried in both directions ("colour" <-> "color").
+SPELLING_PAIRS = (
+    ("our", "or"), ("ise", "ize"), ("isi", "izi"), ("isa", "iza"), ("yse", "yze"), ("ysi", "yzi"),
+    ("ence", "ense"), ("ogue", "og"), ("ae", "e"), ("oe", "e"), ("ement", "ment"), ("ll", "l"),
+    ("grey", "gray"), ("mme", "m"), ("oul", "ol"), ("que", "ck"), ("sc", "sk"), ("tyre", "tire"),
+    ("pyjama", "pajama"), ("cosy", "cozy"), ("plough", "plow"), ("aluminium", "aluminum"),
+    ("doughnut", "donut"), ("draught", "draft"), ("moustache", "mustache"), ("manoeuvr", "maneuver"),
+    ("storey", "story"), ("kerb", "curb"), ("whisky", "whiskey"), ("axe", "ax"), ("artefact", "artifact"),
+    ("jewellery", "jewelry"), ("sceptic", "skeptic"),
+)
+SPELLING_ENDINGS = ((re.compile(r"(?<=[^aeiou])re(s?)$"), r"er\1"), (re.compile(r"(?<=[^aeiou])er(s?)$"), r"re\1"))
 SOURCE_RANK = {"supplement": 0, "contraction": 0, "corpus": 1, "kept": 2, "hunspell": 3}
+
+
+def spelling_variants(word: str) -> set[str]:
+    """The word respelled by one British/American difference ("centre" -> "center", "travelled" ->
+    "traveled", "color" -> "colour"); most candidates are not words."""
+    out = set()
+    for a, b in SPELLING_PAIRS:
+        for old, new in ((a, b), (b, a)):
+            starts = [m.start() for m in re.finditer(f"(?={re.escape(old)})", word)]
+            for i in starts:
+                out.add(word[:i] + new + word[i + len(old):])
+            if len(starts) > 1:
+                out.add(word.replace(old, new))
+    for pattern, replacement in SPELLING_ENDINGS:
+        out.add(pattern.sub(replacement, word))
+    out.discard(word)
+    return out
 
 
 def fold(word: str) -> str:
@@ -323,11 +386,12 @@ def is_all_upper(word: str) -> bool:
 _W: dict = {}
 
 
-def _init_worker(bases: dict, sibling_base: str | None, lang_id: str) -> None:
+def _init_worker(bases: dict, sibling_bases: dict | None, lang_id: str) -> None:
     _W["main"] = Hunspell(bases["main"])
     _W["caps"] = Hunspell(bases["caps"])
     _W["upper"] = Hunspell(bases["upper"])
-    _W["sibling"] = Hunspell(sibling_base) if sibling_base else None
+    _W["sibling"] = Hunspell(sibling_bases["main"]) if sibling_bases else None
+    _W["sibling_caps"] = Hunspell(sibling_bases["caps"]) if sibling_bases else None
     _W["lang"] = LANGUAGES[lang_id]
 
 
@@ -372,10 +436,24 @@ def _check_words(words: list[str]) -> list[bool]:
     return [main(w) for w in words]
 
 
+def _sibling_info(words: list[str]) -> list[tuple[bool, bool]]:
+    """(the sibling dictionary accepts the lower-case word, the sibling knows the word only as a proper
+    noun): "york" is a cricket verb in en_GB only, en_US knows just "York". A word whose other spelling
+    the sibling accepts ("center" for en_GB's "centre", "grey" for "gray") is no proper noun."""
+    sibling, caps = _W["sibling"], _W["sibling_caps"]
+    out = []
+    for w in words:
+        if sibling(w):
+            out.append((True, False))
+        else:
+            out.append((False, caps(w[:1].upper() + w[1:]) and not any(sibling(v) for v in spelling_variants(w))))
+    return out
+
+
 class SpellPool:
-    def __init__(self, bases: dict, sibling_base: str | None, lang_id: str, processes: int):
+    def __init__(self, bases: dict, sibling_bases: dict | None, lang_id: str, processes: int):
         ctx = multiprocessing.get_context("fork" if sys.platform != "win32" else "spawn")
-        self.pool = ctx.Pool(processes, initializer=_init_worker, initargs=(bases, sibling_base, lang_id))
+        self.pool = ctx.Pool(processes, initializer=_init_worker, initargs=(bases, sibling_bases, lang_id))
 
     def _map(self, fn, items: list, chunk: int = 2000) -> list:
         chunks = [items[i:i + chunk] for i in range(0, len(items), chunk)]
@@ -390,6 +468,9 @@ class SpellPool:
     def check(self, words: list[str]) -> list[bool]:
         return self._map(_check_words, words)
 
+    def sibling_info(self, words: list[str]) -> list[tuple[bool, bool]]:
+        return self._map(_sibling_info, words)
+
     def close(self) -> None:
         self.pool.close()
         self.pool.join()
@@ -399,7 +480,8 @@ class SpellPool:
 # Inputs
 # ---------------------------------------------------------------------------------------------
 
-def read_frequencies(code: str) -> tuple[dict[str, int], int]:
+def read_frequencies(code: str, only: set[str] | None = None) -> tuple[dict[str, int], int]:
+    """Lower-cased corpus counts (only of the words in `only`, if given) and the corpus total."""
     counts: dict[str, int] = defaultdict(int)
     total = 0
     with open(fetch(FREQUENCY_WORDS.format(code)), encoding="utf-8") as f:
@@ -409,7 +491,9 @@ def read_frequencies(code: str) -> tuple[dict[str, int], int]:
                 continue
             count = int(parts[1])
             total += count
-            counts[unicodedata.normalize("NFC", parts[0]).lower()] += count
+            word = unicodedata.normalize("NFC", parts[0]).lower()
+            if only is None or word in only:
+                counts[word] += count
     return dict(counts), total
 
 
@@ -445,6 +529,46 @@ def read_supplement(name: str) -> list[tuple[str, float, list[str]]]:
         absorbed = [kbdl.lookup_key(unicodedata.normalize("NFC", s)) for s in row[2:]]
         out.append((unicodedata.normalize("NFC", row[0]), z, absorbed))
     return out
+
+
+MUST_HAVE_MIN_ZIPF = 2.0
+
+
+def read_must_have(name: str, lang_id: str) -> tuple[list[tuple[str, float]], list[str]]:
+    """Rows "[<id>:] <word> [<min zipf>]" and "[<id>:] !<word>" of a must-have list (tools/data):
+    (required words with their minimum zipf, lookup keys that must be absent) for dictionary `lang_id`."""
+    required, absent = [], []
+    for row in read_table(name):
+        if row[0].endswith(":"):
+            if row[0][:-1] != lang_id:
+                continue
+            row = row[1:]
+        word = unicodedata.normalize("NFC", row[0])
+        if word.startswith("!"):
+            absent.append(kbdl.lookup_key(word[1:]))
+        else:
+            required.append((word, float(row[1]) if len(row) > 1 else MUST_HAVE_MIN_ZIPF))
+    return required, absent
+
+
+def check_must_have(lex: "kbdl.Lexicon", name: str, lang_id: str) -> list[str]:
+    """Problems of a dictionary with its must-have list: every word present with exactly its casing,
+    as the most frequent casing of its key and with at least its zipf; no casing of an absent key."""
+    problems = []
+    required, absent = read_must_have(name, lang_id)
+    for word, min_zipf in required:
+        ids = sorted(lex.lookup(kbdl.lookup_key(word)))
+        forms = [lex.word(i) for i in ids]
+        if word not in forms:
+            problems.append(f"must-have {word!r} is missing" + (f" (has {forms})" if forms else ""))
+        elif forms[0] != word:
+            problems.append(f"must-have {word!r} is not the main casing ({forms[0]!r} ranks first)")
+        elif lex.zipf(ids[0]) + 1 / 64 < min_zipf:
+            problems.append(f"must-have {word!r} has zipf {lex.zipf(ids[0]):.2f} < {min_zipf}")
+    for key in absent:
+        if lex.lookup(key):
+            problems.append(f"{key!r} must be absent (has {[lex.word(i) for i in lex.lookup(key)]})")
+    return problems
 
 
 def is_plain_word(word: str, letters: str) -> bool:
@@ -521,6 +645,17 @@ def casing_hints(lang: Language) -> dict[str, int]:
     return dict(hints)
 
 
+def mid_sentence_casing(lang: Language) -> dict[str, int]:
+    """Google Books 2gram counts of each second word with its casing. Unlike the 1grams (merged by
+    casing) these keep the casing, and a second word never starts a sentence."""
+    if not lang.ngrams:
+        return {}
+    counts: dict[str, int] = defaultdict(int)
+    for (_, second), freq in read_ngrams(lang.ngrams, 2):
+        counts[second] += freq
+    return dict(counts)
+
+
 def build_bigrams(lang: Language) -> list[tuple[str, str, float]]:
     """(previous key, next key, log2 P(next | previous)) with P >= 2^-8."""
     if not lang.ngrams:
@@ -539,6 +674,17 @@ def build_bigrams(lang: Language) -> list[tuple[str, str, float]]:
         log2p = math.log2(min(1.0, freq / denominator))
         if log2p >= MIN_LOG2_BIGRAM:
             out.append((a, b, log2p))
+    # Curated pairs; kbdl.build keeps the higher probability of a pair listed twice.
+    for row in read_table(lang.bigram_supplement) if lang.bigram_supplement else []:
+        try:
+            previous, nxt, probability = row
+            probability = float(probability)
+        except ValueError:
+            raise SystemExit(f"{lang.bigram_supplement}: expected 'previous next probability', got {' '.join(row)!r}")
+        if not 0 < probability <= 1:
+            raise SystemExit(f"{lang.bigram_supplement}: probability out of range in {' '.join(row)!r}")
+        out.append((kbdl.lookup_key(unicodedata.normalize("NFC", previous)),
+                    kbdl.lookup_key(unicodedata.normalize("NFC", nxt)), math.log2(probability)))
     return out
 
 
@@ -680,16 +826,25 @@ def build_language(lang: Language, processes: int) -> tuple[bytes, dict, list[tu
     supplement = read_supplement(lang.supplement) if lang.supplement else []
 
     bases = prepare_hunspell(lang.hunspell)
-    sibling = prepare_hunspell(lang.sibling)["main"] if lang.sibling else None
+    sibling_bases = prepare_hunspell(lang.sibling) if lang.sibling else None
+    sibling = sibling_bases["main"] if sibling_bases else None
     main = Hunspell(bases["main"])
     rejected_known = [w for w in lang.known if not main(w)]
     if rejected_known:
         raise SystemExit(f"{lang.id}: hunspell rejects {rejected_known}; dictionary conversion failed?")
 
-    pool = SpellPool(bases, sibling, lang.id, processes)
+    pool = SpellPool(bases, sibling_bases, lang.id, processes)
     try:
         log(f"[{lang.id}] checking {len(tokens)} words with hunspell")
         classified = dict(zip(tokens, pool.classify(tokens)))
+        sibling_lower: set[str] = set()   # the sibling variant accepts the lower-case word
+        sibling_proper: set[str] = set()  # ... knows the word only as a proper noun ("york")
+        if sibling_bases:
+            for w, (lower, proper) in zip(tokens, pool.sibling_info(tokens)):
+                if lower:
+                    sibling_lower.add(w)
+                elif proper:
+                    sibling_proper.add(w)
         names = sorted(contraction_counts)
         contraction_counts = {w: contraction_counts[w] for w, ok in zip(names, pool.check(names)) if ok}
 
@@ -714,32 +869,82 @@ def build_language(lang: Language, processes: int) -> tuple[bytes, dict, list[tu
     standalone = {w for w in tokens if w.endswith("'") and main(w)}
     respelled = find_respellings(lang, tokens, counts, classified,
                                  {w.replace("'", "").lower(): w for w in contraction_counts}, standalone)
+    # The other variant's spellings ("favorite" in en-GB, "colour" in en-US, also "center", which
+    # en_GB knows only as a name) count for this variant's spelling and are left out.
+    def lower_valid(c: str) -> bool:
+        return c in classified and any(kind == "lower" for _, kind in classified[c][0])
+
+    for w in tokens:
+        if w in sibling_lower and w not in respelled and not lower_valid(w):
+            targets = [v for v in spelling_variants(w) if lower_valid(v)]
+            if targets:
+                respelled[w] = max(targets, key=lambda v: (counts[v], v))
+    # Curated junk (names, subtitle credits) is left out; listed misspellings move to their word.
+    rejected: set[str] = set()
+    for row in read_table(lang.reject) if lang.reject else []:
+        spelling = kbdl.lookup_key(unicodedata.normalize("NFC", row[0]))
+        if len(row) == 1:
+            rejected.add(spelling)
+        elif spelling in counts:
+            respelled[spelling] = kbdl.lookup_key(unicodedata.normalize("NFC", row[1]))
     for w, target in respelled.items():
         for _ in range(4):  # chains such as an OCR error of a diacritic-less spelling
             target = respelled.get(target, target)
         if target in contraction_counts:
             contraction_counts[target] += counts[w]
-        else:
+        elif target in effective:
             effective[target] += counts[w]
+        else:
+            raise SystemExit(f"{lang.id}: {w!r} is respelled to {target!r}, which is not in the corpus")
     stats["merged spellings"] = len(respelled)
+    stats["rejected words"] = len(rejected)
 
     hints = casing_hints(lang)
+    mid_case = mid_sentence_casing(lang) if lang.german_casing else {}
     # English Hunspell: recognises English words in other corpora and names (also for en-GB/en-US,
     # whose sibling may know a name that their own dictionary lacks).
     english = None if lang.corpus == "en" else Hunspell(prepare_hunspell("en/en_US")["main"])
     namer = Hunspell(sibling) if sibling else english
+    # Frequencies of the unknown words (and of "danny" for "dannys") in the other subtitle corpora.
+    unknown = {w for w in tokens if not classified[w][0]}
+    unknown |= {w[:-1] for w in unknown if w.endswith("s")}
+    others = [read_frequencies(code, unknown) for code in sorted({lg.corpus for lg in LANGUAGES.values()})
+              if code != lang.corpus] if english is not None else []
+
+    def foreign_share(word: str) -> float:
+        own = counts.get(word, 0) / total
+        return sum(c.get(word, 0) / t for c, t in others) / own if own else 0.0
+
+    def foreign_name(word: str) -> bool:
+        """A name or English word from the same films ("danny"), also as a possessive ("dannys")."""
+        if word in ENGLISH_LOANWORDS:
+            return False
+        if english(word) or foreign_share(word) >= FOREIGN_SHARE:
+            return True
+        base = word[:-1]
+        return (word.endswith("s") and len(base) >= 3 and base in counts and not classified.get(base, ([],))[0]
+                and (foreign_share(base) >= FOREIGN_SHARE or english(base[:1].upper() + base[1:])))
+    kept_list = None
+    if lang.kept_list:
+        kept_list = {kbdl.lookup_key(unicodedata.normalize("NFC", row[0])): unicodedata.normalize("NFC", row[0])
+                     for row in read_table(lang.kept_list)}
+    dominant_caps = set(lang.dominant_caps)
     function_words = set(tokens[:GERMAN_FUNCTION_WORD_RANK])
     top_words = {w for w in tokens[:GLUE_RANK] if len(w) >= 2}
     entries: list[tuple] = []  # (form, zipf, source, hint)
     kept_unknown = 0
     for w in tokens:
-        if w in respelled or (TRIPLE.search(w) and not lang.allow_triples):
+        if w in respelled or w in rejected or (TRIPLE.search(w) and not lang.allow_triples):
             continue
         forms, sibling_valid = classified[w]
         z = zipf_of(effective[w], total)
         if "-" in w and rank[w] >= FREQUENT_RANK:
             continue  # Hunspell accepts any hyphenation of two valid words
         if not forms:
+            if kept_list is not None and w in kept_list:
+                entries.append((kept_list[w], z, "kept", hints.get(kept_list[w], 0)))
+                kept_unknown += 1
+                continue
             # Frequent words Hunspell does not know (okay, handy, slang, names), but not glued
             # words ("ofthe") nor, in other languages, English from untranslated subtitle lines.
             if not (rank[w] < FREQUENT_RANK and counts[w] >= KEPT_MIN_COUNT and len(w) >= 2
@@ -747,7 +952,7 @@ def build_language(lang: Language, processes: int) -> tuple[bytes, dict, list[tu
                     and any(c in VOWELS for c in w) and w not in SUBTITLE_JUNK
                     and not any(w[:i] in top_words and w[i:] in top_words for i in range(2, len(w) - 1))):
                 continue
-            if english is not None and english(w) and w not in ENGLISH_LOANWORDS:
+            if english is not None and foreign_name(w):
                 continue
             cap = w[:1].upper() + w[1:]
             form = w
@@ -759,22 +964,52 @@ def build_language(lang: Language, processes: int) -> tuple[bytes, dict, list[tu
                     form = w.upper()  # "fbi"
             if form == w and len(w) >= 3 and hints.get(cap, 0) > 4 * hints.get(w, 0):
                 form = cap  # mostly written capitalised
+            if kept_list is not None and form != cap:
+                continue  # unlisted lower-case/UPPER noise: "zach", "tha", "gracias", "NDER"
             entries.append((form, z, "kept", hints.get(form, 0)))
             kept_unknown += 1
             continue
         forms = [(form, kind) for form, kind in forms if len(form) > 1 or form in lang.singles]
         kinds = {kind for _, kind in forms}
+        dominant = None
+        if "lower" in kinds:
+            # The Capitalised twin is the main form when Google Books has the word capitalised
+            # (>= 92 %: "Zeit", "Hause", "God", "China"), German 2grams have it capitalised in
+            # mid-sentence ("die Frage"; not for the most frequent words, which are mostly function
+            # words, verbs and adverbs in conversation: "weg", "leben"), the sibling variant knows it
+            # only as a proper noun ("york" -> "York") or it is listed ("Dio").
+            for cap in [f for f, k in forms if k == "cap"] or [w[:1].upper() + w[1:]]:
+                mid_cap, mid_lower = mid_case.get(cap, 0), mid_case.get(w, 0)
+                if (cap in dominant_caps or hints.get(cap, 0) > hints.get(w, 0)
+                        or (w in sibling_proper and cap == w[:1].upper() + w[1:])
+                        or (mid_cap > 0 and w not in function_words
+                            and mid_cap >= GERMAN_MID_SENTENCE_SHARE * (mid_cap + mid_lower))):
+                    dominant = cap
+                    break
+            if dominant is not None and all(f != dominant for f, _ in forms):
+                forms.append((dominant, "cap"))  # Hunspell derives "Hause" only from "hausen"
+                kinds.add("cap")
+                stats["added capitalised twins"] = stats.get("added capitalised twins", 0) + 1
         for form, kind in forms:
             value = z
             duplicate = (kind == "cap" and "lower" in kinds) or (kind == "upper" and len(kinds) > 1)
-            if duplicate and not lang.german_casing:
+            if form == dominant:
+                pass  # the main casing keeps the corpus frequency
+            elif dominant is not None and kind == "lower":
+                value = z - (GERMAN_TWIN_PENALTY if lang.german_casing else lang.capital_penalty)
+            elif duplicate and not lang.german_casing:
                 # Outside German a Capitalised/UPPER twin of a very frequent word is dictionary
                 # noise (chemical symbols "He", "In"; place names "Came"; acronyms "OR").
                 if rank[w] < DUPLICATE_MIN_RANK and form not in lang.keep_duplicates:
                     continue
                 value = z - lang.capital_penalty
             elif duplicate and kind == "cap":
-                value = z - (0.3 if w in function_words else 0.0)
+                mid_cap, mid_lower = mid_case.get(form, 0), mid_case.get(w, 0)
+                if (mid_lower > 0 and form not in lang.forced_caps
+                        and mid_lower >= GERMAN_MID_SENTENCE_SHARE * (mid_cap + mid_lower)):
+                    value = z - GERMAN_TWIN_PENALTY  # "Haben", "Einen", "Gut"
+                else:
+                    value = z - (0.3 if w in function_words else 0.0)
             elif duplicate:
                 value = z - lang.capital_penalty
             entries.append((form, value, "corpus", hints.get(form, 0)))
@@ -798,7 +1033,7 @@ def build_language(lang: Language, processes: int) -> tuple[bytes, dict, list[tu
 
     # Hunspell-only stems (not in the corpus) fill the remaining budget at zipf 0.8.
     present = {kbdl.lookup_key(e[0]) for e in entries}
-    blocked = present | absorbed | contraction_stems | {kbdl.lookup_key(w) for w in respelled}
+    blocked = present | absorbed | contraction_stems | rejected | {kbdl.lookup_key(w) for w in respelled}
     accented_folds = {fold(k) for k in present if fold(k) != k}
     added = 0
     for stem, ok in zip(dic_stems, dic_ok):
@@ -887,6 +1122,8 @@ def verify(ids: list[str]) -> bool:
             problems.append(f"missing {missing}")
         if present:
             problems.append(f"should not contain {present}")
+        if lang.must_have:
+            problems += check_must_have(lex, lang.must_have, lang_id)
         if lang_id == "de-AT":
             j, jan = rank("Jänner"), rank("Januar")
             if j is None or (jan is not None and j > jan):

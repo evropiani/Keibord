@@ -1,0 +1,31 @@
+# Conversational word pairs for Resources/Dictionaries/it.kbdl (tools/build_dictionaries.py).
+#
+# Format: <previous> <next> <probability>
+#   probability = P(next | previous) in everyday messages, a hand estimate. The Google Books bigrams
+#   (the main source) miss pairs that are rare in books ("per favore", "grazie mille"). A pair
+#   already in the books keeps the higher probability. Below 2^-8 (0.004) a pair is dropped.
+
+per favore 0.03
+grazie mille 0.1
+grazie per 0.1
+ti amo 0.1
+ti voglio 0.05
+voglio bene 0.1
+mi dispiace 0.05
+mi manchi 0.03
+come stai 0.1
+come va 0.1
+tutto bene 0.1
+va bene 0.2
+buona notte 0.2
+buona giornata 0.1
+buona serata 0.1
+a presto 0.005
+a domani 0.005
+ci vediamo 0.05
+non lo 0.03
+lo so 0.1
+non so 0.03
+ho capito 0.03
+un abbraccio 0.01
+che fai 0.02

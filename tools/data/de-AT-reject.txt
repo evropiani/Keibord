@@ -1,0 +1,116 @@
+# Corpus words left out of Resources/Dictionaries/de-AT.kbdl (tools/build_dictionaries.py).
+#
+# Format: <spelling> [<word>]
+#   A spelling alone is left out (subtitle noise the automatic filters miss: names, subtitle credits).
+#   With a word, the spelling is a misspelling: its frequency moves to the word and the keyboard
+#   corrects it.
+
+# Misspellings, OCR errors and spellings without umlauts -> the word
+vieleicht vielleicht
+bischen bisschen
+kaffe kaffee
+jetz jetzt
+einzigste einzige
+letzen letzten
+geschrieen geschrien
+weibt weißt
+heibt heißt
+teiepathen telepathen
+koennen können
+muessen müssen
+fuer für
+
+# Fragments, two words written as one, slurs
+aufjeden
+zuende
+jedesmal
+gottseidank
+sicherheits
+hatt
+japse
+spasti
+
+# Subtitle credits and styling codes
+subcentral
+untertitelung
+vicomedia
+zerotollerance
+chwhite
+chcyan
+chgreen
+jazzhead
+beenthere
+angeldream
+whiteywhiteman
+
+# Names from films and series
+ingalls
+corabeth
+healey
+oleson
+godsey
+cybill
+daktari
+otaru
+hardcastle
+bogg
+gamera
+kamui
+deienn
+almanzo
+elanna
+wameru
+gisburne
+garibaidi
+cuina
+kjeld
+binford
+livie
+harrys
+lukes
+blairs
+kents
+hipp
+vikaay
+rockfish
+heffernan
+lebrac
+chowllye
+bellheim
+lelouch
+drenton
+mascha
+maskell
+pettersson
+kelzi
+corax
+tichy
+rebbekah
+arigold
+eddi
+findus
+kiriu
+dehoh
+bozz
+starsk
+isabell
+erdal
+melmac
+elischka
+yohko
+franzl
+ninh
+geass
+frumfondel
+gungellan
+tschitti
+elya
+arcy
+akkie
+uld
+rde
+hüa
+gue
+ige
+ssen
+nnen

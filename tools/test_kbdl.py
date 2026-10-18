@@ -6,10 +6,12 @@ import itertools
 import os
 import struct
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kbdl  # noqa: E402
+import build_dictionaries as builder  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -297,6 +299,111 @@ class BundledDictionaryTests(unittest.TestCase):
                 self.assertEqual(lex.language_id, os.path.basename(path)[:-5])
                 self.assertLessEqual(lex.word_count, 250_000)
                 self.assertLessEqual(len(lex.data), 12 * 1024 * 1024)
+
+    def bundled(self, lang_id):
+        path = os.path.join(ROOT, "Resources", "Dictionaries", f"{lang_id}.kbdl")
+        if not os.path.exists(path):
+            self.skipTest(f"{lang_id}.kbdl is not built")
+        return kbdl.Lexicon.from_file(path)
+
+    def test_must_have_words(self):
+        """tools/data/<id>-must-have.txt: everyday words with their main casing and frequency."""
+        for lang_id, lang in builder.LANGUAGES.items():
+            with self.subTest(lang=lang_id):
+                self.assertIsNotNone(lang.must_have)
+                required, _ = builder.read_must_have(lang.must_have, lang_id)
+                self.assertGreaterEqual(len(required), 120)
+                self.assertEqual(builder.check_must_have(self.bundled(lang_id), lang.must_have, lang_id), [])
+
+    def test_required_and_forbidden_words(self):
+        for lang_id, lang in builder.LANGUAGES.items():
+            with self.subTest(lang=lang_id):
+                lex = self.bundled(lang_id)
+                words = set(lex.words())
+                required = list(lang.required)
+                if lang.supplement:
+                    required += [word for word, _, _ in builder.read_supplement(lang.supplement)]
+                self.assertEqual([w for w in required if w not in words], [])
+                self.assertEqual([w for w in lang.forbidden if w in words], [])
+
+    def test_bigrams_only_with_a_source(self):
+        for lang_id, lang in builder.LANGUAGES.items():
+            with self.subTest(lang=lang_id):
+                count = self.bundled(lang_id).stats()["bigrams"]
+                if lang.ngrams is None:
+                    self.assertEqual(count, 0)  # Albanian: no bigram source
+                else:
+                    self.assertGreater(count, 2000)
+
+    def test_common_bigrams(self):
+        def log2p(lang_id, a, b):
+            lex = self.bundled(lang_id)
+            ids = sorted(lex.lookup(kbdl.lookup_key(a)))
+            target = sorted(lex.lookup(kbdl.lookup_key(b)))[0]
+            return dict(lex.successors(ids[0], 1000)).get(target)
+
+        for lang_id, a, b in [("de-AT", "ich", "bin"), ("de-AT", "in", "der"), ("en-GB", "of", "the"),
+                              ("en-US", "I", "am"), ("it", "non", "è"), ("it", "per", "favore")]:
+            with self.subTest(pair=f"{a} {b}"):
+                self.assertIsNotNone(log2p(lang_id, a, b))
+
+    def test_casing_of_twins(self):
+        """The main casing of a key comes first: nouns in German, proper nouns, lower-case verbs."""
+        cases = {
+            "de-AT": ["Zeit", "Freund", "Angst", "Hause", "Haus", "gehen", "haben", "sein", "ich", "Österreich"],
+            "en-GB": ["I", "God", "French", "York", "China", "London", "may", "will", "bill"],
+            "en-US": ["I", "God", "French", "Charlie", "China", "center", "may"],
+            "it": ["Dio", "Roma", "papa", "perché"],
+            "sq": ["Kosovë", "Gjermani", "është"],
+        }
+        for lang_id, words in cases.items():
+            lex = self.bundled(lang_id)
+            for word in words:
+                with self.subTest(lang=lang_id, word=word):
+                    ids = sorted(lex.lookup(kbdl.lookup_key(word)))
+                    self.assertTrue(ids, f"{word} is missing")
+                    self.assertEqual(lex.word(ids[0]), word)
+
+
+class PipelineHelperTests(unittest.TestCase):
+    """Pure helpers of tools/build_dictionaries.py (no downloads, no Hunspell)."""
+
+    def test_spelling_variants(self):
+        self.assertIn("color", builder.spelling_variants("colour"))
+        self.assertIn("colour", builder.spelling_variants("color"))
+        self.assertIn("center", builder.spelling_variants("centre"))
+        self.assertIn("centres", builder.spelling_variants("centers"))
+        self.assertIn("traveled", builder.spelling_variants("travelled"))
+        self.assertIn("realize", builder.spelling_variants("realise"))
+        self.assertIn("defense", builder.spelling_variants("defence"))
+        self.assertIn("grey", builder.spelling_variants("gray"))
+        self.assertIn("judgment", builder.spelling_variants("judgement"))
+        self.assertNotIn("york", builder.spelling_variants("york"))
+        self.assertEqual({v for v in builder.spelling_variants("york") if v in {"yorke", "yorks"}}, set())
+
+    def test_must_have_list(self):
+        data = kbdl.build("de-AT", [("ich", 7.0), ("Zeit", 6.0), ("gehen", 5.5), ("zeit", 5.0), ("Gehen", 4.5),
+                                    ("Topfen", 2.6), ("strasse", 2.0)])
+        lex = kbdl.Lexicon(data)
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+            f.write("# comment\nich 6.5\nZeit 5.5\ngehen\nde-AT: Topfen 3   # Austrian\nen-GB: colour\n"
+                    "!Straße\n")
+        try:
+            required, absent = builder.read_must_have(f.name, "de-AT")
+            self.assertEqual(required, [("ich", 6.5), ("Zeit", 5.5), ("gehen", 2.0), ("Topfen", 3.0)])
+            self.assertEqual(absent, ["straße"])
+            self.assertEqual(builder.check_must_have(lex, f.name, "de-AT"),
+                             ["must-have 'Topfen' has zipf 2.59 < 3.0"])
+            with open(f.name, "a", encoding="utf-8") as g:
+                g.write("zeit\nHaus\n!STRASSE\n")
+            self.assertEqual(builder.check_must_have(lex, f.name, "de-AT"), [
+                "must-have 'Topfen' has zipf 2.59 < 3.0",
+                "must-have 'zeit' is not the main casing ('Zeit' ranks first)",
+                "must-have 'Haus' is missing",
+                "'strasse' must be absent (has ['strasse'])",
+            ])
+        finally:
+            os.unlink(f.name)
 
 
 if __name__ == "__main__":

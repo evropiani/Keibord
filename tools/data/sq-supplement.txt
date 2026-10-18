@@ -93,8 +93,9 @@ Evropë 4.0
 Evropa 3.8
 Europë 3.4
 Europa 3.4
-Gjermani 4.0
-Gjermania 3.8
+# "gjermani" (the German man) is far rarer than the country; typed in lower case it means the country.
+Gjermani 4.1 gjermani
+Gjermania 3.8 gjermania
 Zvicër 3.8 zvicer
 Zvicra 3.5
 Austri 3.3
@@ -114,6 +115,10 @@ kosovarët 2.9 kosovaret
 prishtinas 2.3
 tiranas 2.3
 shqip 4.5
+# Hunspell lacks the name; the subtitles write it in lower case.
+Jezus 4.9 jezus
+Jezusi 4.2 jezusi
+Jezu 4.3 jezu
 
 # Kosovo colloquial
 hajt 3.9

@@ -3,7 +3,8 @@
 #
 # Every word must be in the dictionary with exactly this casing AND be the most frequent casing of
 # its key: "Zeit" must outrank "zeit", "gehen" must outrank "Gehen". Words whose two casings are
-# both everyday words ("Essen" / "essen", "Leben" / "leben") are not listed.
+# both everyday words ("Essen" / "essen", "Leben" / "leben", "Liebe" / "ich liebe", "tut mir leid")
+# are not listed.
 # A trailing number is the minimum zipf (default 2.0: an everyday word must not look rare).
 
 # Function words, pronouns
@@ -117,7 +118,7 @@ gibt 5.5
 gut 6
 schön 5.5
 groß 5
-klein 5
+klein 4.5
 neu 4.5
 alt 5
 lang 4.5
@@ -193,13 +194,13 @@ Frühstück 4.5
 Abendessen 4.5
 Woche 5
 Wochenende 4.5
-Montag 4.5
+Montag 4
 Dienstag 4
 Mittwoch 4
 Donnerstag 4
-Freitag 4.5
-Samstag 4.5
-Sonntag 4.5
+Freitag 4
+Samstag 4
+Sonntag 4
 Jahr 5
 Tag 5.5
 Abend 5
@@ -220,8 +221,7 @@ Geburtstag 4.5
 Weihnachten 4.5
 Ostern 3.5
 Hunger 4.5
-Wetter 4.5
-Regen 4
+Wetter 4
 Schnee 4
 Sonne 4.5
 Stadt 5
@@ -230,7 +230,6 @@ Problem 5.5
 Frage 5
 Antwort 4.5
 Idee 5
-Liebe 5
 Hund 5
 Katze 4.5
 Glück 5
@@ -241,9 +240,7 @@ Menschen 5
 Hilfe 5.5
 Ahnung 5
 Angst 5
-Recht 5
 Hause 5
-Leid 4.5
 
 # Austria
 Österreich 4.5
@@ -252,7 +249,7 @@ Graz 3
 Salzburg 3.5
 Jänner 4
 Feber 3
-März 4
+März 3.5
 Mai 4
 heuer 3.5
 Paradeiser 3
@@ -265,7 +262,7 @@ Obers 2.5
 Kren 2.5
 Jause 3
 Servus 4
-Baba 3
+baba 3
 leiwand 3
 Spital 3.5
 Matura 3

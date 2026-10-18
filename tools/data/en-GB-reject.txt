@@ -1,0 +1,8 @@
+# Corpus words left out of Resources/Dictionaries/en-GB.kbdl (tools/build_dictionaries.py).
+#
+# Format: <spelling> [<word>]: see de-AT-reject.txt. en_GB Hunspell accepts "gray" (the unit of
+# radiation), so the American spelling of the colour would stay in the British dictionary.
+gray grey
+grays greys
+grayer greyer
+grayish greyish

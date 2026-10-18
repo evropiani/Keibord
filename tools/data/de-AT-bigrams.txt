@@ -1,0 +1,43 @@
+# Conversational word pairs for Resources/Dictionaries/de-AT.kbdl (tools/build_dictionaries.py).
+#
+# Format: <previous> <next> <probability>
+#   probability = P(next | previous) in everyday messages, a hand estimate. The Google Books bigrams
+#   (the main source) miss pairs that are rare in books ("gute Nacht", "bis morgen"). A pair already
+#   in the books keeps the higher probability. Below 2^-8 (0.004) a pair is dropped.
+
+ich bin 0.06
+ich habe 0.05
+ich hab 0.03
+ich liebe 0.01
+ich weiß 0.03
+liebe dich 0.3
+hab dich 0.05
+dich lieb 0.2
+wie gehts 0.1
+wie geht 0.05
+geht es 0.2
+hast du 0.2
+bist du 0.2
+kannst du 0.3
+machst du 0.4
+was machst 0.05
+bis morgen 0.1
+bis später 0.08
+bis bald 0.08
+guten Morgen 0.3
+gute Nacht 0.3
+vielen Dank 0.3
+danke schön 0.08
+danke dir 0.05
+kein Problem 0.05
+keine Ahnung 0.05
+alles gute 0.1
+alles klar 0.1
+grüß Gott 0.5
+grüß dich 0.2
+schönen Tag 0.1
+schönes Wochenende 0.15
+liebe Grüße 0.05
+schöne Grüße 0.2
+tut mir 0.3
+mir leid 0.1

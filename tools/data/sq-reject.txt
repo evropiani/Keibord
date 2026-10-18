@@ -1,0 +1,191 @@
+# Corpus words left out of Resources/Dictionaries/sq.kbdl (tools/build_dictionaries.py).
+#
+# Format: <spelling> [<word>]
+#   A spelling alone is left out (subtitle noise the automatic filters miss: names, subtitle credits).
+#   With a word, the spelling is a misspelling: its frequency moves to the word and the keyboard
+#   corrects it.
+
+# Misspellings -> the standard spelling
+falemnderit faleminderit
+sigurtë sigurt
+gjysëm gjysmë
+bër bërë
+ckemi çkemi
+njerzit njerëzit
+regull rregull
+rradhë radhë
+rradha radha
+rradhën radhën
+egziston ekziston
+çfardo çfarëdo
+mirmëngjes mirëmëngjes
+marrveshje marrëveshje
+ktu këtu
+ktë këtë
+gjithve gjithëve
+ndëgjo dëgjo
+ndëgjuar dëgjuar
+tradhëtar tradhtar
+tradhëtuar tradhtuar
+lojra lojëra
+lojrat lojërat
+dokumentat dokumentet
+mbrenda brenda
+gjigand gjigant
+gjigande gjigante
+nië një
+dijmë dimë
+dijnë dinë
+vëllau vëllai
+vëllain vëllanë
+vëllaun vëllanë
+
+# Several words written as one ("së bashku", "në qoftë se", "për shkak")
+sëbashku
+nëqoftëse
+përshkak
+
+# Subtitle credits and foreign words
+titrat
+titra
+titroi
+titrimi
+universehub
+idiota
+marciale
+
+# Names from the subtitles, transliterated and in lower case
+xhon
+xhoni
+xhek
+xhorxh
+xhorxhi
+xho
+xhoi
+xhimi
+xhim
+xhejk
+xhejms
+xheik
+xhosh
+xheni
+xheri
+xhef
+xhejson
+xhesi
+xhej
+xhons
+xhoana
+xhordan
+xhena
+xhei
+xhein
+xhak
+xhonson
+xheremi
+xhesika
+xhill
+xhemre
+çarli
+çarls
+çak
+piter
+frenk
+frenki
+tomi
+tomin
+bobi
+majkëll
+majk
+majki
+majku
+billi
+bili
+deni
+maks
+maksi
+edi
+eduard
+nik
+niki
+skot
+skoti
+hari
+aleks
+dejvid
+dejv
+dejmon
+stiv
+stivi
+stiven
+artur
+karli
+karlos
+brajan
+fredi
+uilli
+uill
+uilliam
+marxh
+riçard
+riçi
+miki
+rik
+riki
+kajl
+markus
+megi
+roxher
+poter
+kejt
+kejti
+keit
+kuin
+lusi
+shon
+tobi
+sindi
+rajan
+raian
+luk
+lukas
+geri
+stifler
+malkolm
+norbit
+katerina
+tajler
+tailer
+trevis
+keli
+tonito
+nataniel
+kaleb
+klark
+konor
+linkoln
+endrju
+nensi
+shejn
+kollins
+uejn
+braun
+ralf
+henk
+natali
+enxhi
+adami
+emi
+eni
+soni
+noa
+ema
+marti
+elli
+izi
+beki
+roni
+viki
+suzana
+rebeka
+tes

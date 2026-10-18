@@ -1,0 +1,43 @@
+# Conversational word pairs for Resources/Dictionaries/en-GB.kbdl and en-US.kbdl (tools/build_dictionaries.py).
+#
+# Format: <previous> <next> <probability>
+#   probability = P(next | previous) in everyday messages, a hand estimate. The Google Books bigrams
+#   (the main source) miss pairs that are rare in books ("I don't" is split as "do n't", "good
+#   morning"). A pair already in the books keeps the higher probability. Below 2^-8 (0.004) a pair
+#   is dropped.
+
+I don't 0.08
+I can't 0.03
+I didn't 0.03
+I love 0.02
+I'll be 0.02
+I'm not 0.06
+I'm sorry 0.05
+I'm going 0.04
+I'm so 0.04
+don't know 0.15
+don't worry 0.05
+love you 0.25
+miss you 0.3
+see you 0.05
+are you 0.1
+how are 0.05
+can you 0.1
+do you 0.15
+what's up 0.05
+let's go 0.15
+good morning 0.08
+good night 0.06
+good luck 0.04
+happy birthday 0.3
+take care 0.15
+sounds good 0.2
+no problem 0.05
+no worries 0.02
+talk to 0.3
+call me 0.05
+text me 0.1
+on my 0.05
+my way 0.02
+thank you 0.6
+thanks for 0.2
