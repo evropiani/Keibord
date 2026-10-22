@@ -10,9 +10,9 @@ No network code anywhere: dictionaries, autocorrect and learning all run on your
 - **Autocorrect & predictions:** spelling and typo correction, accent restoration (`eshte` → `është`, `perche` → `perché`), German noun capitalization (`haus` → `Haus`), next-word predictions, undo a correction with backspace.
 - **Learning:** learns your words and word pairs, plus where you tap each key (adaptive touch model). Incognito mode, dictionary editor and blocked words.
 - **Move devices without losing data:** export everything (learned words, word pairs, touch model, emoji history, settings, optionally your details) as a JSON file, optionally password-encrypted (AES-256). Import by merging or replacing.
-- **Look & feel:** iOS-style keys, key previews, long-press accents, space-bar cursor control, caps lock, smart quotes per language („…“, “…”), double-space period, number row, light/dark/custom colours, key size, corner radius.
+- **Look & feel:** iOS-style keys, key previews, long-press accents, space-bar cursor control, caps lock and held shift, smart quotes per language („…“, “…”), double-space period, number row, light/dark/custom colours, key size, corner radius.
 - **Tinted keys:** pick one or many keys that always stay in a colour of your choice.
-- **Emoji:** full Emoji 17.0 set with skin tones, recents and search in German, English, Italian and Albanian.
+- **Emoji:** full Emoji 17.0 set with skin tones (both people's tones for 🤝 💏 👫 …, the last chosen tone is remembered), recents and search in German, English, Italian and Albanian.
 - **Local AutoFill:** your own email/phone/address/name values are suggested in matching fields. Saved bank cards: number and expiry are stored encrypted, the CVV is never stored, and with “Require CVV” a card only unlocks when you type its CVV.
 - **Text replacements:** Keibord shortcuts, plus your iOS text replacements.
 
@@ -40,7 +40,7 @@ No network code anywhere: dictionaries, autocorrect and learning all run on your
 Every push to `main` runs CI (`.github/workflows/build.yml`):
 - Core tests run on Linux.
 - The iOS project is generated with XcodeGen (`project.yml`) and built unsigned on macOS. The app and keyboard are then ad-hoc signed with their entitlements and packaged as `Keibord.ipa` (a workflow artifact).
-- Tags `v*` publish a GitHub release with the IPA.
+- Tags `v*`, or a manual run of the Build workflow with `release_tag` set, publish a GitHub release with the IPA (notes: `docs/RELEASE_NOTES.md`).
 
 Run core tests locally with `swift test --package-path Core`. Dictionaries are rebuilt with `tools/build_dictionaries.py`, emoji data with `tools/build_emoji.py`, the icon with `tools/make_icon.py`. The design is described in `docs/ARCHITECTURE.md`.
 
