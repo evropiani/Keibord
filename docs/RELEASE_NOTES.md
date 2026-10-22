@@ -7,6 +7,7 @@ Typing
 - No autocorrect inside URLs, e-mail addresses and shortcut phrases; no word suggestions with the cursor inside a word
 
 Keyboard
+- Hold shift to type several capitals; in landscape the keys stay clear of the rounded corners and the notch
 - Fixed multi-key rollover, two-thumb capitals, preview balloons and long-press menus at the screen edges
 - Space-bar cursor no longer drifts; globe key and edge keys behave like the system keyboard
 - Learning is kept when a save fails and is loaded in the background; less work per keystroke
