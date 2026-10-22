@@ -253,10 +253,14 @@ Probabilistic model, everything in **bits** (log2):
   / yxcvbnm`). `unitCount = max(len(row0), len(row1))`. Row 2: `shift (1.3u·k)`, spacer(fill), 7
   letters, spacer(fill), `backspace (1.3u·k)`. Bottom row: `numbers "123"`, `emoji`, optional
   `language` (when `showLanguageKey`), optional `globe` (when `showGlobeKey`), `space (fill)`, `return`.
-  Bottom-row widths are specified for a 10-unit row (123: 1.25, emoji: 1.25, language: 1.15, globe:
-  1.15, return: 2.4) and scaled by `unitCount / 10`.
+  Bottom-row widths (`LayoutFactory.BottomRowWidths`) are specified for a 10-unit row (123: 1.25,
+  emoji: 1.25, language: 1.15, globe: 1.15, return: 2.4 minus 0.2 per character key in the row) and
+  scaled by `unitCount / 10`. When the optional keys would squeeze the space bar below 4u (3.5u with
+  character keys, `.com` 1.6u), function keys shrink towards 1u and return towards 1.5u; if that is not
+  enough the emoji key is dropped (only when the globe key is shown). Characters already on the page
+  (`@`, `.` on "123") are not repeated.
   Variants: `.email` → `…, space, "@" (1u), "." (1u), return`; `.url` → `…, "." , "/", ".com"
-  (id `dotcom`, 1.6u, alternates `.at .de .com .net .org .eu .it .al .co.uk`), return` (no space);
+  (id `dotcom`, fill, alternates `Alternates.topLevelDomains(for:)`), return` (no space);
   `.webSearch` → `…, space, ".", return`.
   Optional number row (`showNumberRow`) on top: `1…0` with alternates.
 * **Numbers** (`.numbers`): `1 2 3 4 5 6 7 8 9 0` / `- / : ; ( ) <currency> & @ "` /
@@ -279,8 +283,10 @@ Probabilistic model, everything in **bits** (log2):
   e.g. `qwertz11.letters.standard`.
 * `public struct KeyboardMetrics` — row pitch, key height, gaps, insets; presets
   `static func standard(height: KeyHeightOption, landscape: Bool) -> KeyboardMetrics`
-  (portrait standard: rowPitch 54, keyHeight 43 → gaps 11, horizontal gap 6, side inset 3, top inset 6,
-  bottom inset 2; compact −4 pt pitch, tall +5 pt; landscape: rowPitch 40, keyHeight 32).
+  (portrait standard: rowPitch 54, keyHeight 43 → gaps 11, horizontal gap 6, side inset 3, top inset 4,
+  bottom inset 4; compact pitch 50, tall 59; landscape: rowPitch 40 (37/43), keyHeight pitch − 8, top
+  inset 3, bottom inset 2). The keyboard lays the key area out inside the view's safe area, so in
+  landscape the rounded corners and the sensor housing stay free.
   `func keyboardHeight(rows: Int) -> CGFloat` (excluding the suggestion bar).
 * `public enum LayoutGeometry { static func frames(for: KeyboardLayout, width: CGFloat, metrics: KeyboardMetrics) -> [KeyFrame] }`
   — `public struct KeyFrame { key: KeySpec; rect: CGRect; row: Int; index: Int }`. Unit width =
