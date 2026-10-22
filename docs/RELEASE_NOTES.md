@@ -11,7 +11,7 @@ Keyboard
 - Fixed multi-key rollover, two-thumb capitals, preview balloons and long-press menus at the screen edges
 - Space-bar cursor no longer drifts; globe key and edge keys behave like the system keyboard
 - Learning is kept when a save fails and is loaded in the background; less work per keystroke
-- Emoji search finds inflected words; skin tones for more emoji
+- Emoji search finds inflected words; skin tones for more emoji, and every skin-tone pair for two people (🤝 💏 💑 👫) in a 5 × 5 picker
 
 App and data
 - Export never leaves out learned data; import asks again for a wrong or empty password and explains damaged files
