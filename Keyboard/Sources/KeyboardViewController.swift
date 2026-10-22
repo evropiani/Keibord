@@ -21,6 +21,8 @@ final class KeyboardViewController: UIInputViewController {
     private var emojiSearchBarAdded = false
     private var cardUnlockAdded = false
     private var heightConstraint: NSLayoutConstraint?
+    /// Height of the suggestion bar plus the keys, as computed by `render()`.
+    private var requestedHeight: CGFloat = 260
 
     private enum Mode: Equatable { case keys, emoji, emojiSearch, cardUnlock(UUID) }
     private var mode: Mode = .keys
@@ -108,10 +110,17 @@ final class KeyboardViewController: UIInputViewController {
         view.addSubview(suggestionBar)
         view.addSubview(keyboardView)
 
-        let h = view.heightAnchor.constraint(equalToConstant: 260)
+        installHeightConstraint()
+    }
+
+    /// Asks the system for `requestedHeight` with a new height constraint on the keyboard's view.
+    private func installHeightConstraint() {
+        heightConstraint?.isActive = false
+        let h = view.heightAnchor.constraint(equalToConstant: requestedHeight)
         h.priority = UILayoutPriority(999)
         h.isActive = true
         heightConstraint = h
+        view.setNeedsLayout()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -151,6 +160,10 @@ final class KeyboardViewController: UIInputViewController {
         // The keyboard window's system edge gestures delay touchesBegan for keys at the screen edges
         // (q, a, p, shift, backspace…), which made those keys lag and break rollover order.
         view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+        // A keyboard can only change its height once it has been drawn on screen; a request made
+        // before is not always applied (iOS 27 kept the default height, which cut off the bottom row).
+        // Ask again now. Should the height still fall short, the rows shrink to fit (KeyboardView).
+        installHeightConstraint()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -469,6 +482,7 @@ final class KeyboardViewController: UIInputViewController {
         let keysHeight = baseMetrics.keyboardHeight(rows: rows)
         var total = Self.barHeight + keysHeight
         if searching { total += Self.barHeight }
+        requestedHeight = total
         if heightConstraint?.constant != total { heightConstraint?.constant = total }
 
         if mode == .keys || searching {

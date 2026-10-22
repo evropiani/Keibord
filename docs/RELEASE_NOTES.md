@@ -1,21 +1,7 @@
-Keibord 1.0.1: a full test and bug-fix round over the whole keyboard and app.
+Keibord 1.0.2: the bottom key row is no longer cut off.
 
-Typing
-- Better autocorrect in all five languages: German noun twins ("die zeit" → "Zeit"), accents restored across languages ("perche" → "perché", "eshte" → "është"), sentence context picks the language, English names capitalised ("john" → "John")
-- Cleaner dictionaries: everyday and Austrian words checked ("Jänner", "Paradeiser", "Sackerl", "leiwand"), fewer subtitle artefacts and false names, common word pairs for predictions
-- Smart quotes, double-space period, abbreviations ("z.B.", "Dr.") and spacing after suggestions fixed in many edge cases
-- No autocorrect inside URLs, e-mail addresses and shortcut phrases; no word suggestions with the cursor inside a word
+- On iOS 27 the keyboard could stay at the system's default height, which hid most of the bottom row (123, emoji, space, return). Keibord now asks for its height again once it is on screen, and if iOS still gives it less room, the key rows shrink to fit instead of being cut off.
 
-Keyboard
-- Hold shift to type several capitals; in landscape the keys stay clear of the rounded corners and the notch
-- Fixed multi-key rollover, two-thumb capitals, preview balloons and long-press menus at the screen edges
-- Space-bar cursor no longer drifts; globe key and edge keys behave like the system keyboard
-- Learning is kept when a save fails and is loaded in the background; less work per keystroke
-- Emoji search finds inflected words; skin tones for more emoji, and every skin-tone pair for two people (🤝 💏 💑 👫) in a 5 × 5 picker; the grid remembers the tone you chose for each emoji
+Everything from 1.0.1 is included: better autocorrect in all five languages, cleaner dictionaries, hold shift for capitals, landscape safe area, skin-tone pairs for two people and many keyboard and app fixes.
 
-App and data
-- Export never leaves out learned data; import asks again for a wrong or empty password and explains damaged files
-- Card vault and device secret can no longer be overwritten by stale copies
-- Damaged settings or learning files are repaired entry by entry instead of being reset
-
-Install `Keibord.ipa` with Sideloadly/AltStore/SideStore, or use TestFlight (docs/INSTALL-NO-PC.md). Installing over 1.0.0 keeps your data; for a fresh install use Export/Import in the app.
+Install `Keibord.ipa` with Sideloadly/AltStore/SideStore, or use TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data; for a fresh install use Export/Import in the app.

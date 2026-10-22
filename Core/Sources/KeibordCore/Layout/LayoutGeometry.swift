@@ -35,6 +35,19 @@ public struct KeyboardMetrics: Hashable, Sendable {
     public func keyboardHeight(rows: Int) -> CGFloat {
         topInset + rowPitch * CGFloat(rows) + bottomInset
     }
+
+    /// These metrics squeezed into a key area of `height` points when the system made the keyboard
+    /// lower than it asked for: keys and gaps shrink in proportion, so no row is cut off. Unchanged
+    /// when `height` is enough or not known yet (≤ 0).
+    public func fitted(toHeight height: CGFloat, rows: Int) -> KeyboardMetrics {
+        guard rows > 0, height > 0, height < keyboardHeight(rows: rows) - 0.5 else { return self }
+        let available = height - topInset - bottomInset
+        let scale = max(0.2, available / (rowPitch * CGFloat(rows)))
+        var fitted = self
+        fitted.rowPitch = rowPitch * scale
+        fitted.keyHeight = keyHeight * scale
+        return fitted
+    }
 }
 
 public struct KeyFrame {

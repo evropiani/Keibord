@@ -91,6 +91,19 @@ final class KeyboardViewControllerTests: XCTestCase {
 
     // MARK: Typing
 
+    func testHeightIsRequestedAgainOnceTheKeyboardIsOnScreen() {
+        start()
+        let requested = height
+        XCTAssertGreaterThan(requested, 0)
+        let first = vc.view.heightAnchor.testConstraints.last
+        vc.viewDidAppear(false)
+        let again = vc.view.heightAnchor.testConstraints.last
+        XCTAssertFalse(first === again, "a new constraint asks the system again")
+        XCTAssertEqual(first?.isActive, false)
+        XCTAssertEqual(again?.isActive, true)
+        XCTAssertEqual(again?.constant, requested)
+    }
+
     func testKeysStayInsideTheSafeAreaInLandscape() {
         start()
         vc.view.frame = CGRect(x: 0, y: 0, width: 844, height: vc.view.bounds.height)

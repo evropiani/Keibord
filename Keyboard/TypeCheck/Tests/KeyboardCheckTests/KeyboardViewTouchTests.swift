@@ -266,6 +266,20 @@ final class KeyboardViewTouchTests: XCTestCase {
 
     // MARK: Popups
 
+    func testRowsShrinkWhenTheKeyAreaIsLowerThanRequested() {
+        setUpKeyboard(request())
+        keyboard.frame.size.height = 170 // the system kept the keyboard lower than it asked for
+        keyboard.layoutIfNeeded()
+        let keys = keyboard.subviews.compactMap { $0 as? KeyView }
+        XCTAssertFalse(keys.isEmpty)
+        XCTAssertLessThanOrEqual(keys.map(\.frame.maxY).max() ?? 0, 170, "no row is cut off")
+        guard let space = keys.first(where: { $0.key.id == "space" }) else { return XCTFail("no space key") }
+        let t = touch(at: CGPoint(x: space.frame.midX, y: space.frame.midY + barHeight))
+        down(t)
+        up(t)
+        XCTAssertEqual(recorder.actions, ["space"], "touches use the shrunk rows")
+    }
+
     func testPopupOfATopRowKeyStaysInsideTheInputView() {
         metrics = KeyboardMetrics.standard(height: .tall, landscape: false)
         setUpKeyboard(request())

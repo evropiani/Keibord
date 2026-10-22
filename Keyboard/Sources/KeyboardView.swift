@@ -151,6 +151,8 @@ final class KeyboardView: UIView {
     private var keyViews: [Int: KeyView] = [:]
     private var resolver: TouchResolver?
     private var laidOutWidth: CGFloat = 0
+    /// `metrics` fitted into the current height (see `KeyboardMetrics.fitted(toHeight:rows:)`).
+    private var laidOutMetrics: KeyboardMetrics?
 
     private let popup = KeyPopupView()
     /// Frame index of the key the preview balloon was last shown for.
@@ -244,9 +246,13 @@ final class KeyboardView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard let layout = layout, bounds.width > 0 else { return }
-        if laidOutWidth == bounds.width, !keyViews.isEmpty { return }
+        // When the system keeps the keyboard lower than requested, the rows shrink to fit instead of
+        // the bottom row being cut off.
+        let fitted = metrics.fitted(toHeight: bounds.height, rows: layout.rows.count)
+        if laidOutWidth == bounds.width, laidOutMetrics == fitted, !keyViews.isEmpty { return }
         laidOutWidth = bounds.width
-        frames = LayoutGeometry.frames(for: layout, width: bounds.width, metrics: metrics)
+        laidOutMetrics = fitted
+        frames = LayoutGeometry.frames(for: layout, width: bounds.width, metrics: fitted)
         resolver = TouchResolver(frames: frames, offsets: touchOffsets, touchModelKey: layout.touchModelKey)
         keyViews.values.forEach { $0.removeFromSuperview() }
         keyViews = [:]
@@ -273,10 +279,11 @@ final class KeyboardView: UIView {
     private func installGlobeControl(for f: KeyFrame) {
         let control = UIControl()
         control.backgroundColor = .clear
-        let halfGap = metrics.horizontalGap / 2
-        let top = f.rect.minY - (metrics.rowPitch - metrics.keyHeight) / 2
+        let m = laidOutMetrics ?? metrics
+        let halfGap = m.horizontalGap / 2
+        let top = f.rect.minY - (m.rowPitch - m.keyHeight) / 2
         control.frame = CGRect(x: f.rect.minX - halfGap, y: top, width: f.rect.width + 2 * halfGap,
-                               height: metrics.rowPitch + metrics.bottomInset)
+                               height: m.rowPitch + m.bottomInset)
         control.addTarget(self, action: #selector(globeTouchDown), for: .touchDown)
         control.addTarget(self, action: #selector(globeTouchEnded), for: [.touchUpInside, .touchUpOutside, .touchCancel])
         if let target = inputModeTarget {

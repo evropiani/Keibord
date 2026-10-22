@@ -37,6 +37,23 @@ final class LayoutGeometryTests: XCTestCase {
         XCTAssertEqual(KeyboardMetrics.standard(height: .tall, landscape: false).rowPitch, 59)
     }
 
+    /// The system may keep the keyboard lower than requested (iOS 27 kept its default height): the rows
+    /// then shrink so every row stays inside the key area.
+    func testMetricsFittedIntoALowerKeyArea() {
+        let m = KeyboardMetrics.standard(height: .standard, landscape: false)
+        XCTAssertEqual(m.fitted(toHeight: m.keyboardHeight(rows: 4), rows: 4), m)
+        XCTAssertEqual(m.fitted(toHeight: 400, rows: 4), m, "more room than needed: unchanged")
+        XCTAssertEqual(m.fitted(toHeight: 0, rows: 4), m, "height not known yet")
+        let fitted = m.fitted(toHeight: 180, rows: 4)
+        XCTAssertEqual(fitted.keyboardHeight(rows: 4), 180, accuracy: 0.001)
+        XCTAssertEqual(fitted.keyHeight / fitted.rowPitch, m.keyHeight / m.rowPitch, accuracy: 0.001)
+        XCTAssertEqual(fitted.horizontalGap, m.horizontalGap)
+        let layout = LayoutFactory.layout(for: LayoutRequest(language: .deAT, base: .qwertz, page: .letters, variant: .standard,
+                                                             showNumberRow: false, showLanguageKey: true, showGlobeKey: false, returnKind: .default))
+        let frames = LayoutGeometry.frames(for: layout, width: 440, metrics: fitted)
+        XCTAssertLessThanOrEqual(frames.map(\.rect.maxY).max() ?? 0, 180)
+    }
+
     // MARK: Invariants for every combination
 
     func testFramesForEveryCombinationWidthAndHeight() {
