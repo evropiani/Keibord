@@ -258,6 +258,8 @@ open class UIView: UIResponder {
     open var backgroundColor: UIColor?
     open var isHidden: Bool = false
     open var alpha: CGFloat = 1
+    /// Read-only in UIKit; settable here so tests can simulate landscape on Face ID iPhones.
+    open var safeAreaInsets: UIEdgeInsets = .zero
     open var tag: Int = 0
     open var isUserInteractionEnabled: Bool = true
     open var isMultipleTouchEnabled: Bool = false
@@ -475,6 +477,7 @@ open class UIViewController: UIResponder {
     open func viewDidDisappear(_ animated: Bool) {}
     open func viewWillLayoutSubviews() {}
     open func viewDidLayoutSubviews() {}
+    open func viewSafeAreaInsetsDidChange() {}
     open func didReceiveMemoryWarning() {}
     open func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {}
     open func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {}

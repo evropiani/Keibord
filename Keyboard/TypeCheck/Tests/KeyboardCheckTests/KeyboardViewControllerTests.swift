@@ -91,6 +91,17 @@ final class KeyboardViewControllerTests: XCTestCase {
 
     // MARK: Typing
 
+    func testKeysStayInsideTheSafeAreaInLandscape() {
+        start()
+        vc.view.frame = CGRect(x: 0, y: 0, width: 844, height: vc.view.bounds.height)
+        vc.view.safeAreaInsets = UIEdgeInsets(top: 0, left: 47, bottom: 0, right: 47)
+        vc.viewSafeAreaInsetsDidChange()
+        vc.viewDidLayoutSubviews()
+        XCTAssertEqual(keyboard.frame.minX, 47)
+        XCTAssertEqual(keyboard.frame.width, 750)
+        XCTAssertEqual(subview(SuggestionBarView.self)?.frame.minX, 47)
+    }
+
     func testKeysTypeIntoTheDocumentWithAutoCapitalisation() {
         start()
         type("hallo du")

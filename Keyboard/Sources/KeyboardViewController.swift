@@ -182,6 +182,11 @@ final class KeyboardViewController: UIInputViewController {
         layoutChildren()
     }
 
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        view.setNeedsLayout()
+    }
+
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
         coordinator.animate(alongsideTransition: { _ in self.render() }, completion: nil)
@@ -498,14 +503,17 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func layoutChildren() {
-        let b = view.bounds
+        // In landscape on Face ID iPhones the keys stay clear of the rounded corners and the sensor
+        // housing, like the system keyboard (the margins show the keyboard background).
+        let insets = view.safeAreaInsets
+        let b = CGRect(x: insets.left, y: 0, width: max(0, view.bounds.width - insets.left - insets.right), height: view.bounds.height)
         switch mode {
         case .keys:
-            suggestionBar.frame = CGRect(x: 0, y: 0, width: b.width, height: Self.barHeight)
-            keyboardView.frame = CGRect(x: 0, y: Self.barHeight, width: b.width, height: max(0, b.height - Self.barHeight))
+            suggestionBar.frame = CGRect(x: b.minX, y: 0, width: b.width, height: Self.barHeight)
+            keyboardView.frame = CGRect(x: b.minX, y: Self.barHeight, width: b.width, height: max(0, b.height - Self.barHeight))
         case .emojiSearch:
-            if emojiSearchBarAdded { emojiSearchBar.frame = CGRect(x: 0, y: 0, width: b.width, height: 2 * Self.barHeight) }
-            keyboardView.frame = CGRect(x: 0, y: 2 * Self.barHeight, width: b.width, height: max(0, b.height - 2 * Self.barHeight))
+            if emojiSearchBarAdded { emojiSearchBar.frame = CGRect(x: b.minX, y: 0, width: b.width, height: 2 * Self.barHeight) }
+            keyboardView.frame = CGRect(x: b.minX, y: 2 * Self.barHeight, width: b.width, height: max(0, b.height - 2 * Self.barHeight))
         case .emoji:
             if emojiPanelAdded { emojiPanel.frame = b }
         case .cardUnlock:
