@@ -10,6 +10,8 @@ enum KeyboardViewEvent {
     case returnKey
     case shift
     case shiftDoubleTap
+    /// The finger left the shift key (letters typed while it was held are all capitalised).
+    case shiftReleased
     case switchPage(LayoutPage)
     case emoji
     case nextLanguage
@@ -379,6 +381,7 @@ final class KeyboardView: UIView {
 
     /// Drops every tracked touch without committing it (layout change, keyboard disappearing).
     func cancelAllTouches() {
+        let shiftWasHeld = tracked.values.contains { $0.key.action == .shift }
         tracked.values.forEach { $0.timer?.invalidate() }
         tracked = [:]
         globePressed = false
@@ -388,6 +391,7 @@ final class KeyboardView: UIView {
             trackpadActive = false
             delegate?.keyboardView(self, didTrigger: .trackpad(false))
         }
+        if shiftWasHeld { delegate?.keyboardView(self, didTrigger: .shiftReleased) }
     }
 
     /// Keys that commit early when another touch begins (rollover), like the system keyboard.
@@ -586,6 +590,7 @@ final class KeyboardView: UIView {
                 delegate?.keyboardView(self, didTrigger: .trackpad(false))
             }
             if t.mode == .callout { callout.isHidden = true }
+            if t.key.action == .shift { delegate?.keyboardView(self, didTrigger: .shiftReleased) }
         }
         if tracked.isEmpty {
             popup.isHidden = true
@@ -634,7 +639,8 @@ final class KeyboardView: UIView {
         case .switchPage(let page): delegate?.keyboardView(self, didTrigger: .switchPage(page))
         case .emoji: delegate?.keyboardView(self, didTrigger: .emoji)
         case .nextLanguage: delegate?.keyboardView(self, didTrigger: .nextLanguage)
-        case .shift, .backspace, .globe, .none: break
+        case .shift: delegate?.keyboardView(self, didTrigger: .shiftReleased)
+        case .backspace, .globe, .none: break
         }
     }
 

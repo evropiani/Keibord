@@ -288,6 +288,40 @@ final class InputControllerTests: XCTestCase {
         XCTAssertEqual(doc.text, "ABC. Df")
     }
 
+    func testHoldingShiftCapitalisesEveryLetterUntilReleased() {
+        c.configure(field: noAutoCap)
+        c.handle(.shift)
+        c.setShiftHeld(true)
+        type("ab")
+        XCTAssertEqual(c.shiftState, .on, "shift stays on while it is held")
+        c.setShiftHeld(false)
+        XCTAssertEqual(c.shiftState, .off, "releasing shift after typing turns it off")
+        type("c")
+        XCTAssertEqual(doc.text, "ABc")
+    }
+
+    func testShiftReleasedWithoutTypingKeepsTheTap() {
+        c.configure(field: noAutoCap)
+        c.handle(.shift)
+        c.setShiftHeld(true)
+        c.setShiftHeld(false)
+        XCTAssertEqual(c.shiftState, .on)
+        type("ab")
+        XCTAssertEqual(doc.text, "Ab")
+    }
+
+    func testReleasingShiftLeavesCapsLockOn() {
+        c.configure(field: noAutoCap)
+        c.handle(.shift)
+        c.handle(.shiftDoubleTap)
+        c.setShiftHeld(true)
+        type("ab")
+        c.setShiftHeld(false)
+        XCTAssertEqual(c.shiftState, .locked)
+        type("c")
+        XCTAssertEqual(doc.text, "ABC")
+    }
+
     func testDoubleTapWithoutCapsLockSettingActsAsSecondTap() {
         make(settings { $0.capsLock = false }, field: noAutoCap)
         c.handle(.shift)

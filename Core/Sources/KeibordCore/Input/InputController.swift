@@ -54,6 +54,10 @@ public final class InputController {
     private var expectedContext: String?
     /// The user set the shift state by hand; auto-capitalisation leaves it alone until the next letter.
     private var manualShift = false
+    /// The shift key is held down: letters typed meanwhile all stay capitalised ("ABC" while holding shift).
+    public private(set) var shiftHeld = false
+    /// A letter was typed while shift was held, so releasing it turns shift off.
+    private var typedWhileShiftHeld = false
     /// A closing single quote that becomes an apostrophe if a letter follows directly ("‚er geht‘" + s → "geht’s").
     private var pendingApostrophe: (quote: String, apostrophe: String, taps: [TapInput])?
 
@@ -354,6 +358,21 @@ public final class InputController {
         pendingApostrophe = nil
     }
 
+    /// The shift key went down (`true`, after its `.shift`/`.shiftDoubleTap` event) or up (`false`). Like the
+    /// system keyboard, letters typed while it is held are all capitalised, and releasing it after typing
+    /// turns shift off again; released without typing, the tap's shift state stays.
+    public func setShiftHeld(_ held: Bool) {
+        guard held != shiftHeld else { return }
+        shiftHeld = held
+        let typed = typedWhileShiftHeld
+        typedWhileShiftHeld = false
+        guard !held, typed, shiftState == .on else { return }
+        shiftState = .off
+        manualShift = false
+        updateAutoShift()
+        delegate?.controllerStateDidChange(self)
+    }
+
     private func toggleShift() {
         let wasLocked = shiftState == .locked
         shiftState = shiftState == .off ? .on : .off
@@ -387,8 +406,12 @@ public final class InputController {
         undo = nil
         autoSpace = false
         lastSpaceTime = nil
-        if shiftState == .on { shiftState = .off }
-        manualShift = false
+        if shiftHeld, shiftState == .on {
+            typedWhileShiftHeld = true
+        } else {
+            if shiftState == .on { shiftState = .off }
+            manualShift = false
+        }
     }
 
     /// Punctuation that ends the word before it (and triggers its autocorrection).

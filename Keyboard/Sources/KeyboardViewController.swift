@@ -793,8 +793,13 @@ extension KeyboardViewController: KeyboardViewDelegate {
             playFeedback(sound: 1155)
         case .space: controller.handle(.space)
         case .returnKey: controller.handle(.returnKey)
-        case .shift: controller.handle(.shift)
-        case .shiftDoubleTap: controller.handle(.shiftDoubleTap)
+        case .shift:
+            controller.handle(.shift)
+            controller.setShiftHeld(true)
+        case .shiftDoubleTap:
+            controller.handle(.shiftDoubleTap)
+            controller.setShiftHeld(true)
+        case .shiftReleased: controller.setShiftHeld(false)
         case .switchPage(let page): controller.handle(.switchPage(page))
         case .emoji:
             mode = .emoji
@@ -841,7 +846,7 @@ extension KeyboardViewController: KeyboardViewDelegate {
             mode = .emoji
             render()
             return
-        case .nextLanguage, .selectLanguage, .shift, .shiftDoubleTap, .moveCursor, .trackpad:
+        case .nextLanguage, .selectLanguage, .shift, .shiftDoubleTap, .shiftReleased, .moveCursor, .trackpad:
             return
         }
         updateEmojiSearch(query)

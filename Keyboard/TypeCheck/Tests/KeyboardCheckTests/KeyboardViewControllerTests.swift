@@ -98,12 +98,23 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(keyView("a")?.label.text, "a")
     }
 
+    func testHoldingShiftTypesCapitalsUntilReleased() {
+        start()
+        type("ich bin ")
+        send(.shift)
+        type("orf")
+        send(.shiftReleased)
+        type("x")
+        XCTAssertEqual(proxy.text, "Ich bin ORFx")
+    }
+
     func testTypingDoesNotRebuildKeyViews() {
         start()
         let a = keyView("a"), space = keyView("space")
         XCTAssertNotNil(a)
         type("hallo du ")
         send(.shift)
+        send(.shiftReleased)
         send(.backspace)
         XCTAssertTrue(keyView("a") === a, "letters, shift and backspace keep the key views")
         XCTAssertTrue(keyView("space") === space)

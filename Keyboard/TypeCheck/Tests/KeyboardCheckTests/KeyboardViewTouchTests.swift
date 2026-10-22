@@ -19,6 +19,7 @@ private final class Recorder: KeyboardViewDelegate {
         case .returnKey: events.append("return")
         case .shift: events.append("shift")
         case .shiftDoubleTap: events.append("capslock")
+        case .shiftReleased: events.append("shiftUp")
         case .switchPage(let page): events.append("page:\(page.rawValue)")
         case .emoji: events.append("emoji")
         case .nextLanguage: events.append("nextLanguage")
@@ -158,12 +159,12 @@ final class KeyboardViewTouchTests: XCTestCase {
         setUpKeyboard(request())
         tap("shift")
         tap("shift")
-        XCTAssertEqual(recorder.actions, ["shift", "capslock"])
+        XCTAssertEqual(recorder.actions, ["shift", "shiftUp", "capslock", "shiftUp"])
         recorder.events = []
         tap("shift")
         wait(0.35)
         tap("shift")
-        XCTAssertEqual(recorder.actions, ["shift", "shift"])
+        XCTAssertEqual(recorder.actions, ["shift", "shiftUp", "shift", "shiftUp"])
     }
 
     func testGlobeTouchesAreForwardedIncludingCancellation() {
@@ -294,7 +295,30 @@ final class KeyboardViewTouchTests: XCTestCase {
         XCTAssertEqual(popup()?.isHidden, false, "the held letter keeps its preview")
         up(h)
         XCTAssertEqual(popup()?.isHidden, true)
-        XCTAssertEqual(recorder.actions, ["shift", "char:h"])
+        XCTAssertEqual(recorder.actions, ["shift", "shiftUp", "char:h"])
+    }
+
+    func testShiftHeldWhileTypingIsReleasedAfterTheLetters() {
+        setUpKeyboard(request())
+        let shift = touch(at: point("shift"))
+        down(shift)
+        tap("h")
+        tap("a")
+        up(shift)
+        XCTAssertEqual(recorder.actions, ["shift", "char:h", "char:a", "shiftUp"])
+    }
+
+    func testCancelledShiftTouchIsReleased() {
+        setUpKeyboard(request())
+        let shift = touch(at: point("shift"))
+        down(shift)
+        keyboard.touchesCancelled([shift], with: UIEvent())
+        XCTAssertEqual(recorder.actions, ["shift", "shiftUp"])
+        recorder.events = []
+        wait(0.35) // not a double tap
+        down(touch(at: point("shift")))
+        configure(request(.numbers)) // a page switch drops every touch
+        XCTAssertEqual(recorder.actions, ["shift", "shiftUp"])
     }
 
     func testAccentMenuOnTheRightEdgeStaysInsideTheKeyboard() {
