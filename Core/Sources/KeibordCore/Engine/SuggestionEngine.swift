@@ -699,6 +699,9 @@ public final class SuggestionEngine: SuggestionProviding {
             knownIn.insert(language.dictionaryID)
             let p = prior(language, languages)
             let nounTwin = typedLower && !verbContext && isDominantNoun(lex, language: language, ids: ids, key: typedKey, nounContext: nounContext)
+            // Outside German the main form of a key is its casing in any context: a lower-case twin of a
+            // name ("john", "mike") is not decisive, the case margin decides.
+            let capitalisedMain = typedLower && language != .deAT && ids.first.map { Casing.startsUppercase(lex.word($0)) && !Casing.isAllCaps(lex.word($0)) } == true
             for id in ids {
                 let w = lex.word(id)
                 let score = languageScore(lex, language, id, context) + p
@@ -706,7 +709,7 @@ public final class SuggestionEngine: SuggestionProviding {
                     // Shown as typed, or an acronym ("LOL") that may well be typed in lower case.
                     let lowercase = !Casing.hasUppercase(w)
                     // A lower-case form in the layout language is decisive ("ned", "jo" are Austrian words).
-                    if lowercase, language == languages.first, !nounTwin { decisiveLowercase = true }
+                    if lowercase, language == languages.first, !nounTwin, !capitalisedMain { decisiveLowercase = true }
                     let mass = pow(2, lowercase && nounTwin ? score - nounTwinDiscount : score)
                     keepMass += mass
                     if keepPrior == nil || score > keepPrior!.score { keepPrior = (score, p) }

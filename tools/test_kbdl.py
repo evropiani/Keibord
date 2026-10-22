@@ -351,8 +351,8 @@ class BundledDictionaryTests(unittest.TestCase):
         """The main casing of a key comes first: nouns in German, proper nouns, lower-case verbs."""
         cases = {
             "de-AT": ["Zeit", "Freund", "Angst", "Hause", "Haus", "gehen", "haben", "sein", "ich", "Österreich"],
-            "en-GB": ["I", "God", "French", "York", "China", "London", "may", "will", "bill"],
-            "en-US": ["I", "God", "French", "Charlie", "China", "center", "may"],
+            "en-GB": ["I", "God", "French", "York", "China", "London", "may", "will", "bill", "John", "Mike", "nick"],
+            "en-US": ["I", "God", "French", "Charlie", "China", "center", "may", "John", "Tom", "Peter", "Josh"],
             "it": ["Dio", "Roma", "papa", "perché"],
             "sq": ["Kosovë", "Gjermani", "është"],
         }

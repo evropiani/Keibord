@@ -148,6 +148,21 @@ class Language:
 
 ENGLISH_REQUIRED = ["the", "I", "don't", "I'm", "it's", "can't", "London", "okay", "ok", "OK", "us",
                     "US", "May", "email", "you're"]
+# Names (and a few titles) that subtitles use far more often than their rare lower-case meaning
+# ("john", "mike", "peter out"). Google Books' lists leave names out, so nothing else tells the
+# builder that "John" is the main casing. Not listed: lower-case words in everyday use ("nick of
+# time", "sonny", "randy", "hazel", "rusty", "sherry").
+ENGLISH_NAMES = (
+    "John", "Jack", "Tom", "Mike", "Peter", "Harry", "Bob", "Jimmy", "Lee", "Billy", "Johnny",
+    "Martin", "Roger", "Bobby", "Maria", "Ed", "Smith", "Jenny", "Ted", "Rick", "Josh", "Carter",
+    "Hank", "Joey", "Terry", "Sally", "Molly", "Jean", "Carol", "Jay", "Mason", "Miller", "Brad",
+    "Mickey", "Cooper", "Batman", "Superman", "Mars", "Warren", "Nelson", "Khan", "Ford", "Troy",
+    "Homer", "Hector", "Dale", "Barney", "Bailey", "Veronica", "Turner", "Phoebe", "Sheila",
+    "Drake", "Chad", "Tucker", "Tanner", "Marge", "Napoleon", "Fisher", "Rogers", "Hogan", "Glen",
+    "Chandler", "Noel", "Newton", "Jasper", "Freeman", "Felicity", "Sanders", "Wheeler", "Sawyer",
+    "Colleen", "Thanksgiving", "Soviet", "Pacific", "Pentagon", "Titanic", "Twitter", "Google",
+    "Danish", "Highness", "Excellency",
+)
 ENGLISH_FORBIDDEN = ["i", "don", "didn", "The", "It", "dont", "im", "youre", "thats", "lt", "lm", "goin", "cant"]
 
 LANGUAGES = {
@@ -167,7 +182,7 @@ LANGUAGES = {
     "en-GB": Language(
         id="en-GB", corpus="en", hunspell="en/en_GB", letters="abcdefghijklmnopqrstuvwxyz",
         singles=frozenset({"a", "I"}), max_words=150_000, ngrams="english", sibling="en/en_US",
-        bigram_supplement="en-bigrams.txt", dominant_caps=("Wales",),
+        bigram_supplement="en-bigrams.txt", dominant_caps=("Wales",) + ENGLISH_NAMES,
         contractions="en-contractions.txt", supplement="en-supplement.txt", kept_list="en-kept.txt",
         reject="en-GB-reject.txt", must_have="en-must-have.txt", keep_duplicates=("US", "May", "God"),
         sloppy_suffix="g", known=["the", "colour", "London", "don't"],
@@ -176,7 +191,7 @@ LANGUAGES = {
     "en-US": Language(
         id="en-US", corpus="en", hunspell="en/en_US", letters="abcdefghijklmnopqrstuvwxyz",
         singles=frozenset({"a", "I"}), max_words=150_000, ngrams="english", sibling="en/en_GB",
-        bigram_supplement="en-bigrams.txt", dominant_caps=("Wales",),
+        bigram_supplement="en-bigrams.txt", dominant_caps=("Wales",) + ENGLISH_NAMES,
         contractions="en-contractions.txt", supplement="en-supplement.txt", kept_list="en-kept.txt",
         must_have="en-must-have.txt", keep_duplicates=("US", "May", "God"), sloppy_suffix="g",
         known=["the", "color", "London", "don't"],

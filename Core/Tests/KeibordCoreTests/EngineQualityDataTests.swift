@@ -65,7 +65,7 @@ enum EngineQualityData {
             ("apostrophe", ["dont>don't", "didnt>didn't", "doesnt>doesn't", "isnt>isn't", "wasnt>wasn't", "couldnt>couldn't",
                             "shouldnt>shouldn't", "youre>you're", "theyre>they're", "thats>that's", "whats>what's",
                             "wouldnt>wouldn't", "havent>haven't", "arent>aren't", "im>I'm"]),
-            ("case", ["i>I", "london>London", "monday>Monday"]),
+            ("case", ["i>I", "london>London", "monday>Monday", "john>John", "mike>Mike", "peter>Peter"]),
             ("variety", ["the color>colour", "my favorite>favourite", "center>centre", "theater>theatre", "neighbor>neighbour"]),
         ],
         .sqXK: [
