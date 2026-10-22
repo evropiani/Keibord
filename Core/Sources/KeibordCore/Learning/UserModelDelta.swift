@@ -271,6 +271,11 @@ public extension UserModel {
         emojiByRecency.prefix(32).map { $0.key }
     }
 
+    /// Every emoji ever used, most recently used first (the skin tone last chosen per emoji).
+    var emojiByLastUse: [String] {
+        emojiByRecency.map { $0.key }
+    }
+
     /// Mean learned touch offsets per key id for one layout geometry, clamped to ±0.25 key sizes.
     /// Keys with fewer than `minSamples` (at least 1) samples or unusable sums are left out.
     func touchOffsets(for touchModelKey: String, minSamples: Int = 12) -> [String: (dx: Double, dy: Double)] {

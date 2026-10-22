@@ -630,7 +630,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func configureEmojiPanel(theme: KeyboardTheme) {
-        emojiPanel.configure(catalog: loadCatalog(), recents: emojiRecents, theme: theme, languageCode: controller.language.languageCode)
+        emojiPanel.configure(catalog: loadCatalog(), recents: emojiRecents, used: sessionEmoji + userModel.emojiByLastUse,
+                             theme: theme, languageCode: controller.language.languageCode)
     }
 
     private func insertEmoji(_ emoji: String) {

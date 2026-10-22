@@ -126,6 +126,10 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     weak var delegate: EmojiPanelDelegate?
     private var sections: [EmojiCategory] = []
     private var catalog: EmojiCatalog?
+    /// Grid emoji → the skin tone last chosen for it (shown and inserted instead of the plain emoji).
+    private var preferred: [String: String] = [:]
+    /// The grid emoji whose variants the long-press menu shows.
+    private var variantBase: String?
     private let searchButton = UIButton(type: .system)
     private let collection: UICollectionView
     private let bottomBar = UIStackView()
@@ -175,9 +179,11 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(catalog: EmojiCatalog?, recents: [String], theme: KeyboardTheme, languageCode: String) {
+    /// `used`: every emoji used, newest first (for the skin tone last chosen per emoji).
+    func configure(catalog: EmojiCatalog?, recents: [String], used: [String] = [], theme: KeyboardTheme, languageCode: String) {
         stopBackspaceRepeat() // the bottom bar (and a held backspace button) is rebuilt below
         self.catalog = catalog
+        preferred = catalog?.preferredVariants(used: used) ?? [:]
         self.theme = theme
         self.languageCode = languageCode
         var s: [EmojiCategory] = []
@@ -231,6 +237,8 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         stopBackspaceRepeat()
         catalog = nil
         sections = []
+        preferred = [:]
+        variantBase = nil
         variantStack.isHidden = true
         collection.reloadData()
     }
@@ -256,13 +264,20 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "e", for: indexPath) as! EmojiCell
-        cell.label.text = sections[indexPath.section].emojis[indexPath.item]
+        cell.label.text = shownEmoji(at: indexPath)
         return cell
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         variantStack.isHidden = true
-        delegate?.emojiPanel(self, didSelect: sections[indexPath.section].emojis[indexPath.item])
+        delegate?.emojiPanel(self, didSelect: shownEmoji(at: indexPath))
+    }
+
+    /// The emoji of a cell: recents as used, grid emoji in the skin tone last chosen.
+    private func shownEmoji(at indexPath: IndexPath) -> String {
+        let section = sections[indexPath.section]
+        let emoji = section.emojis[indexPath.item]
+        return section.id == "recents" ? emoji : (preferred[emoji] ?? emoji)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -315,13 +330,15 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     @objc private func longPressed(_ g: UILongPressGestureRecognizer) {
         guard g.state == .began, let path = collection.indexPathForItem(at: g.location(in: collection)),
               let cell = collection.cellForItem(at: path) else { return }
-        let emoji = sections[path.section].emojis[path.item]
+        let shown = sections[path.section].emojis[path.item]
+        let emoji = catalog?.base(of: shown) ?? shown // a toned recent offers its emoji's tones too
         let variants = catalog?.variants(of: emoji) ?? []
         guard !variants.isEmpty else { return }
-        // Two people with a skin tone each come as a 5 × 5 grid (row: first person, column: second);
-        // the plain emoji is a tap on the cell. Everything else: one row with the plain emoji first.
+        variantBase = emoji
+        // Two people with a skin tone each: the plain emoji above a 5 × 5 grid (row: first person,
+        // column: second). Everything else: one row with the plain emoji first.
         let grid = variants.count == 25
-        let rows: [[String]] = grid ? stride(from: 0, to: 25, by: 5).map { Array(variants[$0 ..< $0 + 5]) }
+        let rows: [[String]] = grid ? [[emoji]] + stride(from: 0, to: 25, by: 5).map { Array(variants[$0 ..< $0 + 5]) }
                                     : [Array(([emoji] + variants).prefix(6))]
         let side: CGFloat = grid ? 40 : 46
         variantStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -350,7 +367,12 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
     @objc private func variantTapped(_ sender: UIButton) {
         variantStack.isHidden = true
-        if let e = sender.title(for: .normal) { delegate?.emojiPanel(self, didSelect: e) }
+        guard let e = sender.title(for: .normal) else { return }
+        if let base = variantBase {
+            preferred[base] = e
+            collection.reloadData()
+        }
+        delegate?.emojiPanel(self, didSelect: e)
     }
 }
 

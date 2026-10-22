@@ -69,6 +69,14 @@ final class LearningBackupEmojiTests: XCTestCase {
             XCTAssertEqual(variants[6], sameTone, emoji)
             XCTAssertEqual(variants[1], mixed, emoji)
         }
+        XCTAssertEqual(catalog.base(of: "👍🏽"), "👍")
+        XCTAssertNil(catalog.base(of: "👍"))
+        // The form used last wins; the plain emoji is a choice too.
+        let preferred = catalog.preferredVariants(used: ["👍🏾", "😀", "🤝🏼", "👍🏻", "🤝"])
+        XCTAssertEqual(preferred["👍"], "👍🏾")
+        XCTAssertEqual(preferred["🤝"], "🤝🏼")
+        XCTAssertNil(preferred["😀"])
+        XCTAssertEqual(catalog.preferredVariants(used: ["🤝", "🤝🏼"])["🤝"], "🤝")
         XCTAssertTrue(catalog.search("herz", languageCodes: ["de"]).contains("❤️"))
         XCTAssertTrue(catalog.search("grun", languageCodes: ["de"]).contains("💚"))
         XCTAssertFalse(catalog.search("zemer", languageCodes: ["sq"]).isEmpty)

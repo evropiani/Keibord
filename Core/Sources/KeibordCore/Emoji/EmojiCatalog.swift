@@ -30,6 +30,8 @@ public struct EmojiCategory: Hashable, Sendable {
 public final class EmojiCatalog {
     public let categories: [EmojiCategory]
     private let variantMap: [String: [String]]
+    /// Variant → the grid emoji it belongs to.
+    private let baseMap: [String: String]
     private let baseURL: URL
     /// Grid position of every emoji (ranking tie-break).
     private let position: [String: Int]
@@ -80,11 +82,31 @@ public final class EmojiCatalog {
             }
         }
         variantMap = variants
+        var bases: [String: String] = [:]
+        for (base, list) in variants {
+            for variant in list where bases[variant] == nil { bases[variant] = base }
+        }
+        baseMap = bases
         self.position = position
     }
 
     /// Skin-tone variants of an emoji (empty when it has none).
     public func variants(of emoji: String) -> [String] { variantMap[emoji] ?? [] }
+
+    /// The grid emoji a skin-tone variant belongs to ("👍🏽" → "👍"); `nil` for anything else.
+    public func base(of variant: String) -> String? { baseMap[variant] }
+
+    /// The form last chosen of every grid emoji with variants, from emoji in order of use (newest first):
+    /// the grid shows it instead of the plain emoji, like the system keyboard. The plain emoji counts as
+    /// a choice too.
+    public func preferredVariants(used: [String]) -> [String: String] {
+        var result: [String: String] = [:]
+        for emoji in used {
+            guard let base = baseMap[emoji] ?? (variantMap[emoji] != nil ? emoji : nil), result[base] == nil else { continue }
+            result[base] = emoji
+        }
+        return result
+    }
 
     /// Variants of a modifier base written with U+FE0F after it ("✌️", "🖐️", "🕵️‍♀️", "🏋️"): the
     /// toned forms replace the U+FE0F with the modifier ("✌🏻", "🕵🏻‍♀️"). emoji.json lacks them because
