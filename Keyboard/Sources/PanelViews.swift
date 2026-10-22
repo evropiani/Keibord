@@ -164,7 +164,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         bottomBar.distribution = .fillEqually
         addSubview(bottomBar)
 
-        variantStack.axis = .horizontal
+        variantStack.axis = .vertical
         variantStack.distribution = .fillEqually
         variantStack.isHidden = true
         variantStack.layer.cornerRadius = 10
@@ -316,20 +316,34 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         guard g.state == .began, let path = collection.indexPathForItem(at: g.location(in: collection)),
               let cell = collection.cellForItem(at: path) else { return }
         let emoji = sections[path.section].emojis[path.item]
-        let options = [emoji] + (catalog?.variants(of: emoji) ?? [])
-        guard options.count > 1 else { return }
+        let variants = catalog?.variants(of: emoji) ?? []
+        guard !variants.isEmpty else { return }
+        // Two people with a skin tone each come as a 5 × 5 grid (row: first person, column: second);
+        // the plain emoji is a tap on the cell. Everything else: one row with the plain emoji first.
+        let grid = variants.count == 25
+        let rows: [[String]] = grid ? stride(from: 0, to: 25, by: 5).map { Array(variants[$0 ..< $0 + 5]) }
+                                    : [Array(([emoji] + variants).prefix(6))]
+        let side: CGFloat = grid ? 40 : 46
         variantStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for option in options.prefix(6) {
-            let b = UIButton(type: .system)
-            b.setTitle(option, for: .normal)
-            b.titleLabel?.font = .systemFont(ofSize: 30)
-            b.addTarget(self, action: #selector(variantTapped(_:)), for: .touchUpInside)
-            variantStack.addArrangedSubview(b)
+        for row in rows {
+            let line = UIStackView()
+            line.axis = .horizontal
+            line.distribution = .fillEqually
+            for option in row {
+                let b = UIButton(type: .system)
+                b.setTitle(option, for: .normal)
+                b.titleLabel?.font = .systemFont(ofSize: grid ? 26 : 30)
+                b.addTarget(self, action: #selector(variantTapped(_:)), for: .touchUpInside)
+                line.addArrangedSubview(b)
+            }
+            variantStack.addArrangedSubview(line)
         }
         let cellFrame = cell.convert(cell.bounds, to: self)
-        let width = CGFloat(min(options.count, 6)) * 46
+        let width = CGFloat(rows.map(\.count).max() ?? 1) * side
+        let height = CGFloat(rows.count) * side + 2
         let x = min(max(cellFrame.midX - width / 2, 4), bounds.width - width - 4)
-        variantStack.frame = CGRect(x: x, y: max(0, cellFrame.minY - 50), width: width, height: 48)
+        let y = min(max(0, cellFrame.minY - height - 2), max(0, bounds.height - height))
+        variantStack.frame = CGRect(x: x, y: y, width: width, height: height)
         variantStack.isHidden = false
         bringSubviewToFront(variantStack)
     }

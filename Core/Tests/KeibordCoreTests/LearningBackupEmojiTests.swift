@@ -59,6 +59,16 @@ final class LearningBackupEmojiTests: XCTestCase {
         let catalog = try EmojiCatalog(baseURL: dir)
         XCTAssertEqual(catalog.categories.count, 8)
         XCTAssertEqual(catalog.variants(of: "👍").count, 5)
+        // Two people: a 5 × 5 grid of skin tones (row: first person, column: second), the diagonal being
+        // the emoji's own one-tone form; mixed tones are other sequences ("🫱🏻‍🫲🏼" for 🤝).
+        for (emoji, sameTone, mixed) in [("🤝", "🤝🏼", "🫱🏻\u{200D}🫲🏼"), ("💏", "💏🏼", "🧑🏻\u{200D}❤️\u{200D}💋\u{200D}🧑🏼"),
+                                         ("👭", "👭🏼", "👩🏻\u{200D}🤝\u{200D}👩🏼"), ("🧑\u{200D}🤝\u{200D}🧑", "🧑🏼\u{200D}🤝\u{200D}🧑🏼", "🧑🏻\u{200D}🤝\u{200D}🧑🏼")] {
+            let variants = catalog.variants(of: emoji)
+            XCTAssertEqual(variants.count, 25, emoji)
+            guard variants.count == 25 else { continue }
+            XCTAssertEqual(variants[6], sameTone, emoji)
+            XCTAssertEqual(variants[1], mixed, emoji)
+        }
         XCTAssertTrue(catalog.search("herz", languageCodes: ["de"]).contains("❤️"))
         XCTAssertTrue(catalog.search("grun", languageCodes: ["de"]).contains("💚"))
         XCTAssertFalse(catalog.search("zemer", languageCodes: ["sq"]).isEmpty)
