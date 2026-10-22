@@ -351,6 +351,8 @@ Behaviour (each rule needs a unit test with an in-memory `TextDocumentProxyLike`
   document start, after `. ! ? …` + space, and after a newline; `.words` → after whitespace;
   `.allCharacters` → shift stays on. Manual shift overrides until the next letter. Caps lock
   (`.shiftDoubleTap`, only if `settings.capsLock`) persists until shift is tapped.
+  `setShiftHeld(_:)`: while the shift key is held, letters stay capitalised; releasing it after
+  typing turns shift off (a tap without typing keeps its state).
 * **Pages**: after inserting a space or `'` while on numbers/symbols, return to letters (iOS
   behaviour). `.switchPage` changes page.
 * **Backspace**: deletes one character; `.backspaceRepeat(wordMode: true)` deletes back to the
@@ -479,7 +481,7 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   callout (slide to choose, release to insert). Key popup preview for character keys when
   `settings.keyPopups` (balloon above the key, clamped inside the view — the system clips anything
   above the keyboard). Backspace: delete on touch-down, repeat after 0.5 s every 0.09 s, switch to
-  word mode after 1.2 s. Shift: tap / double-tap within 0.3 s → caps lock. Space: tap inserts; long
+  word mode after 1.2 s. Shift: tap / double-tap within 0.3 s → caps lock; its release (also cancelled) → `.shiftReleased`. Space: tap inserts; long
   press (0.4 s, when `settings.spacebarCursor`) → trackpad mode (key labels fade), horizontal drag of
   ~9 pt per character → `.moveCursor`. Language key: tap → next language, long-press → list.
   Globe: `handleInputModeList(from:with:)` via `addTarget` for all touch events. Emoji key → emoji panel.
