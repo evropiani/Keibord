@@ -22,6 +22,14 @@ public struct BackupPayload: Codable, Equatable, Sendable {
         self.userModel = userModel
     }
 
+    /// The payload with only the chosen parts (an import or export of a selection); parts it does not
+    /// contain stay absent.
+    public func selecting(settings: Bool, profile: Bool, userModel: Bool) -> BackupPayload {
+        BackupPayload(formatVersion: formatVersion, createdAt: createdAt, appVersion: appVersion,
+                      settings: settings ? self.settings : nil, profile: profile ? self.profile : nil,
+                      userModel: userModel ? self.userModel : nil)
+    }
+
     private enum CodingKeys: String, CodingKey { case formatVersion, createdAt, appVersion, settings, profile, userModel }
 
     /// Tolerant like every persisted model; only a payload without any data is rejected.

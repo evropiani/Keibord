@@ -425,7 +425,7 @@ struct DataView: View {
     @State private var askPassword = false
     @State private var passwordWasWrong = false
     @State private var pendingPayload: BackupPayload?
-    @State private var askMode = false
+    @State private var showImportOptions = false
     @State private var busy = false
     @State private var message: String?
     @State private var confirmReset = false
@@ -435,18 +435,18 @@ struct DataView: View {
     private var passwordsMatch: Bool { exportPassword.isEmpty || exportPassword == exportPasswordRepeat }
 
     private var exportsSomething: Bool { includeTypingData || includeSettings || includePersonal }
+    private var exportsOnlySettings: Bool { includeSettings && !includeTypingData && !includePersonal }
 
-    private func filename(for date: Date) -> String {
+    private static func filename(for date: Date, onlySettings: Bool) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd"
-        let kind = includeSettings && !includeTypingData && !includePersonal ? "Settings" : "Backup"
-        return "Keibord-\(kind)-\(f.string(from: date))"
+        return "Keibord-\(onlySettings ? "Settings" : "Backup")-\(f.string(from: date))"
     }
 
     /// "settings, typing data and details" – what a backup file contains.
-    private static func contents(of payload: BackupPayload) -> String {
+    static func contents(of payload: BackupPayload) -> String {
         var parts: [String] = []
         if payload.settings != nil { parts.append("settings") }
         if let model = payload.userModel { parts.append("typing data (\(model.words.count) words)") }
@@ -461,27 +461,35 @@ struct DataView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Typing Data", isOn: $includeTypingData)
-                Toggle("All Settings", isOn: $includeSettings)
-                Toggle("My Details & Text Replacements", isOn: $includePersonal)
                 SecureField("Password (optional)", text: $exportPassword)
                 if !exportPassword.isEmpty {
                     SecureField("Repeat Password", text: $exportPasswordRepeat)
                 }
-                Button(includeSettings && !includeTypingData && !includePersonal ? "Export Settings…" : "Export…") { export() }
-                    .disabled(busy || !passwordsMatch || !exportsSomething)
+                Button("Export All…") { export(all: true) }
+                    .disabled(busy || !passwordsMatch)
             } header: {
                 Text("Export")
             } footer: {
-                Text((passwordsMatch ? "" : "The passwords do not match. ") + "Typing data: learned words, word pairs, your touch model and emoji history. All settings: languages, layouts, appearance, colours, tinted keys and every option. Choose any combination; an import only changes what the file contains. With a password the file is encrypted (AES-256) and cannot be opened without it. Cards are never exported.")
+                Text((passwordsMatch ? "" : "The passwords do not match. ") + "Export All saves your typing data, all settings and your details in one file. With a password it is encrypted (AES-256) and cannot be opened without it. Cards are never exported.")
             }
             Section {
-                Button("Import Backup…") { showImporter = true }
+                Toggle("Typing Data", isOn: $includeTypingData)
+                Toggle("All Settings", isOn: $includeSettings)
+                Toggle("My Details & Text Replacements", isOn: $includePersonal)
+                Button(exportsOnlySettings ? "Export Settings…" : "Export Selected…") { export(all: false) }
+                    .disabled(busy || !passwordsMatch || !exportsSomething)
+            } header: {
+                Text("Export Selected")
+            } footer: {
+                Text("Typing data: learned words, word pairs, your touch model and emoji history. All settings: languages, layouts, appearance, colours, tinted keys and every option.")
+            }
+            Section {
+                Button("Import…") { showImporter = true }
                     .disabled(busy)
             } header: {
                 Text("Import")
             } footer: {
-                Text("Merge combines the backup with what this iPhone has learned; Replace overwrites it.")
+                Text("After choosing a file you can import all of it or only some parts; only what you import changes on this iPhone.")
             }
             Section("Reset") {
                 Button("Delete Learned Data", role: .destructive) { confirmReset = true }
@@ -544,18 +552,15 @@ struct DataView: View {
         } message: {
             Text("This backup is encrypted. Enter the password that was used to export it.")
         }
-        .confirmationDialog("Import Backup", isPresented: $askMode, titleVisibility: .visible) {
-            if pendingPayload?.userModel == nil {
-                Button("Import") { applyImport(.merge) }
-            } else {
-                Button("Merge with This iPhone") { applyImport(.merge) }
-                Button("Replace Typing Data", role: .destructive) { applyImport(.replace) }
-            }
-            Button("Cancel", role: .cancel) { pendingPayload = nil }
-        } message: {
+        .sheet(isPresented: $showImportOptions) {
             if let payload = pendingPayload {
-                Text("This file contains \(DataView.contents(of: payload)). Only these are changed on this iPhone."
-                     + (payload.userModel == nil ? "" : " Merge keeps what this iPhone has learned and adds the backup; Replace deletes it."))
+                ImportOptionsView(payload: payload, onImport: { selection, mode in
+                    showImportOptions = false
+                    applyImport(selection, mode: mode)
+                }, onCancel: {
+                    showImportOptions = false
+                    pendingPayload = nil
+                })
             }
         }
         .confirmationDialog("Delete everything Keibord has learned?", isPresented: $confirmReset, titleVisibility: .visible) {
@@ -579,14 +584,15 @@ struct DataView: View {
 
     /// The backup is built and encrypted in the background (key derivation and encoding several
     /// megabytes of learned data would freeze the screen).
-    private func export() {
+    private func export(all: Bool) {
         busy = true
-        model.makeBackup(includeTypingData: includeTypingData, includeSettings: includeSettings, includePersonal: includePersonal,
-                         password: exportPassword.isEmpty ? nil : exportPassword) { result in
+        let onlySettings = !all && exportsOnlySettings
+        model.makeBackup(includeTypingData: all || includeTypingData, includeSettings: all || includeSettings,
+                         includePersonal: all || includePersonal, password: exportPassword.isEmpty ? nil : exportPassword) { result in
             busy = false
             switch result {
             case .success(let data):
-                exportFilename = filename(for: Date())
+                exportFilename = DataView.filename(for: Date(), onlySettings: onlySettings)
                 exportDocument = BackupDocument(data: data)
                 showExporter = true
             case .failure(let error):
@@ -604,7 +610,7 @@ struct DataView: View {
             case .success(let payload):
                 importData = nil
                 pendingPayload = payload
-                askMode = true
+                showImportOptions = true
             case .failure(let error):
                 let backupError = error as? BackupError
                 if backupError == .wrongPassword || backupError == .passwordRequired {
@@ -620,8 +626,7 @@ struct DataView: View {
         }
     }
 
-    private func applyImport(_ mode: ImportMode) {
-        guard let payload = pendingPayload else { return }
+    private func applyImport(_ payload: BackupPayload, mode: ImportMode) {
         pendingPayload = nil
         busy = true
         model.applyBackup(payload, mode: mode) { ok in
@@ -630,6 +635,67 @@ struct DataView: View {
                 message = "Imported \(DataView.contents(of: payload)) from \(payload.createdAt.formatted(date: .abbreviated, time: .omitted))."
             } else {
                 message = "The backup could not be imported because the learned words could not be saved. Nothing was changed."
+            }
+        }
+    }
+}
+
+/// What to take from a backup file: all of it, or the chosen parts (every part the file contains is on
+/// by default); typing data is merged or replaced.
+struct ImportOptionsView: View {
+    let payload: BackupPayload
+    let onImport: (BackupPayload, ImportMode) -> Void
+    let onCancel: () -> Void
+    @State private var typingData = true
+    @State private var settings = true
+    @State private var details = true
+    @State private var mode: ImportMode = .merge
+
+    private var hasTypingData: Bool { payload.userModel != nil }
+    private var hasSettings: Bool { payload.settings != nil }
+    private var hasDetails: Bool { payload.profile != nil }
+    private var wordCount: Int { payload.userModel?.words.count ?? 0 }
+
+    private var selection: BackupPayload {
+        payload.selecting(settings: settings, profile: details, userModel: typingData)
+    }
+
+    private var selectsSomething: Bool {
+        (typingData && hasTypingData) || (settings && hasSettings) || (details && hasDetails)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    if hasTypingData {
+                        Picker("Typing Data", selection: $mode) {
+                            Text("Merge").tag(ImportMode.merge)
+                            Text("Replace").tag(ImportMode.replace)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    Button("Import All") { onImport(payload, mode) }
+                } footer: {
+                    Text("This file from \(payload.createdAt.formatted(date: .abbreviated, time: .omitted)) contains \(DataView.contents(of: payload)). Only what you import changes on this iPhone."
+                         + (hasTypingData ? " Merge keeps what this iPhone has learned and adds the file's typing data; Replace deletes it first." : ""))
+                }
+                Section {
+                    if hasTypingData { Toggle("Typing Data (\(wordCount) words)", isOn: $typingData) }
+                    if hasSettings { Toggle("All Settings", isOn: $settings) }
+                    if hasDetails { Toggle("My Details & Text Replacements", isOn: $details) }
+                    Button("Import Selected") { onImport(selection, mode) }
+                        .disabled(!selectsSomething)
+                } header: {
+                    Text("Import Selected")
+                }
+            }
+            .navigationTitle("Import")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
             }
         }
     }

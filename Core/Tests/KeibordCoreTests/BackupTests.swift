@@ -272,6 +272,21 @@ final class BackupTests: XCTestCase {
         XCTAssertNotNil(merged.2.words["Paradeiser"])
     }
 
+    func testSelectingPartsOfABackup() {
+        let all = samplePayload()
+        XCTAssertEqual(all.selecting(settings: true, profile: true, userModel: true), all)
+        let settingsOnly = all.selecting(settings: true, profile: false, userModel: false)
+        XCTAssertEqual(settingsOnly.settings, all.settings)
+        XCTAssertNil(settingsOnly.profile)
+        XCTAssertNil(settingsOnly.userModel)
+        XCTAssertEqual(settingsOnly.createdAt, all.createdAt)
+        let noSettings = all.selecting(settings: false, profile: true, userModel: true)
+        XCTAssertNil(noSettings.settings)
+        XCTAssertEqual(noSettings.userModel, all.userModel)
+        XCTAssertNil(samplePayload(profile: false).selecting(settings: true, profile: true, userModel: true).profile,
+                     "a part the file does not contain stays absent")
+    }
+
     // MARK: Applying an import
 
     func testApplyReplace() throws {
