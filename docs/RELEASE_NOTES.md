@@ -1,9 +1,6 @@
-Keibord 1.0.6: smart touch zones, the iPhone keyboard's hidden trick.
+Keibord 1.0.7: light and dark mode fixed.
 
-- Like Apple's keyboard, Keibord now predicts the next letter as you type and quietly enlarges the invisible tap area of the likely letters (after "ther", a tap on the edge of "w" next to "e" types "e"). Nothing moves on screen, and a tap on the middle of a key always types that key, so names and slang still work. It uses your enabled languages and the words Keibord learned from you, and stays off in URL, e-mail and password fields.
-- Measured by typing real German, English, Albanian and Italian sentences with scattered taps: 98.2 % instead of 95.1 % of the letters land right with sloppy taps, and more words come out right after autocorrect.
-- Turn it off under Settings → Learning → Smart Touch Zones.
-
-Includes 1.0.5: taps between keys and around suggestions count.
+- Automatic: the keyboard follows your iPhone's appearance again (an app that asks for a light or dark keyboard still gets one). It could stay dark in light mode, because iOS sometimes reports the keyboard as dark.
+- When the keyboard's colours and the backdrop iOS draws behind it disagree (for example Light chosen in the app while iOS draws a dark backdrop), Keibord now draws its own matching background, so light keys never sit on black again.
 
 Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboard), or use TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.

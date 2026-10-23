@@ -97,8 +97,21 @@ open class UIBezierPath: NSObject {
 open class UITraitCollection: NSObject {
     open var verticalSizeClass: UIUserInterfaceSizeClass { .regular }
     open var horizontalSizeClass: UIUserInterfaceSizeClass { .compact }
-    open var userInterfaceStyle: UIUserInterfaceStyle { .light }
+    open var userInterfaceStyle: UIUserInterfaceStyle = .light
     open var displayScale: CGFloat { 3 }
+    public override init() { super.init() }
+    /// Test-only.
+    public init(testStyle: UIUserInterfaceStyle) {
+        super.init()
+        userInterfaceStyle = testStyle
+    }
+}
+
+open class UIScreen: NSObject {
+    public static let main = UIScreen()
+    /// Test-only: the iPhone's appearance (Settings → Display).
+    public var testUserInterfaceStyle: UIUserInterfaceStyle = .light
+    open var traitCollection: UITraitCollection { UITraitCollection(testStyle: testUserInterfaceStyle) }
 }
 
 public enum UIKeyboardType: Int {
@@ -484,7 +497,9 @@ public protocol UIViewControllerTransitionCoordinator: UIViewControllerTransitio
 
 open class UIViewController: UIResponder {
     open var view: UIView! = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 300))
-    open var traitCollection: UITraitCollection { UITraitCollection() }
+    /// Test-only: what the system reports for the keyboard (it also draws the backdrop in this style).
+    public var testTraitCollection = UITraitCollection()
+    open var traitCollection: UITraitCollection { testTraitCollection }
     open func viewDidLoad() {}
     open func viewWillAppear(_ animated: Bool) {}
     open func viewDidAppear(_ animated: Bool) {}

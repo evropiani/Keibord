@@ -52,15 +52,18 @@ final class KeyboardViewControllerTests: XCTestCase {
         KeibordStore.shared.saveSettings(KeibordSettings())
         KeibordStore.shared.saveUserModel(UserModel())
         CardVault.shared.testCards = []
+        UIScreen.main.testUserInterfaceStyle = .light
     }
 
-    private func start(settings: KeibordSettings? = nil, fullAccess: Bool = false, configure: (TestProxy) -> Void = { _ in }) {
+    private func start(settings: KeibordSettings? = nil, fullAccess: Bool = false, systemBackdrop: UIUserInterfaceStyle = .light,
+                       configure: (TestProxy) -> Void = { _ in }) {
         if let settings = settings { KeibordStore.shared.saveSettings(settings) }
         proxy = TestProxy()
         configure(proxy)
         vc = KeyboardViewController()
         vc.testProxy = proxy
         vc.testHasFullAccess = fullAccess
+        vc.testTraitCollection = UITraitCollection(testStyle: systemBackdrop)
         vc.viewDidLoad()
         vc.viewWillAppear(false)
         vc.viewDidLayoutSubviews()
@@ -101,6 +104,36 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertTrue(subview(SuggestionBarView.self)?.backgroundColor === UIColor.touchableClear)
         send(.emoji)
         XCTAssertTrue(subview(EmojiPanelView.self)?.backgroundColor === UIColor.touchableClear)
+    }
+
+    // MARK: Light and dark
+
+    func testAutomaticFollowsTheIPhoneEvenWhenTheKeyboardIsReportedDark() {
+        UIScreen.main.testUserInterfaceStyle = .light
+        start(systemBackdrop: .dark) // iOS reports (and draws) a dark keyboard in light mode
+        XCTAssertTrue(vc.view.backgroundColor === KeyboardTheme.lightBackdrop, "light keys on Keibord's own light backdrop")
+        UIScreen.main.testUserInterfaceStyle = .dark
+        vc.viewWillDisappear(false)
+        vc.viewWillAppear(false)
+        XCTAssertTrue(vc.view.backgroundColor === UIColor.touchableClear, "dark keys on the system's dark backdrop")
+    }
+
+    func testAnAppAskingForADarkKeyboardGetsOne() {
+        start(systemBackdrop: .light) { $0.keyboardAppearance = .dark }
+        XCTAssertTrue(vc.view.backgroundColor === KeyboardTheme.darkBackdrop)
+    }
+
+    func testChosenLightThemeNeverSitsOnTheDarkSystemBackdrop() {
+        var s = KeibordSettings()
+        s.appearance.themeMode = .light
+        start(settings: s, systemBackdrop: .dark)
+        XCTAssertTrue(vc.view.backgroundColor === KeyboardTheme.lightBackdrop, "white keys used to sit on black")
+        s.appearance.themeMode = .dark
+        KeibordStore.shared.saveSettings(s)
+        markChangedByTheApp(.settings)
+        vc.viewWillDisappear(false)
+        vc.viewWillAppear(false)
+        XCTAssertTrue(vc.view.backgroundColor === UIColor.touchableClear, "dark theme on the dark backdrop: the system's glass")
     }
 
     func testHeightIsRequestedAgainOnceTheKeyboardIsOnScreen() {

@@ -31,6 +31,11 @@ struct KeyboardTheme {
     let keyShadowColor: UIColor
     let secondaryLabel: UIColor
     let backgroundColor: UIColor
+    /// Opaque background for when the system's keyboard backdrop does not match this theme: the custom
+    /// background, or the iOS keyboard colours.
+    let backdropColor: UIColor
+    static let lightBackdrop = UIColor(red: 0.82, green: 0.827, blue: 0.851, alpha: 1) // #D1D3D9
+    static let darkBackdrop = UIColor(red: 0.169, green: 0.169, blue: 0.169, alpha: 1) // #2B2B2B
     private let tintFills: [String: UIColor]
     private let tintLabels: [String: UIColor]
 
@@ -65,8 +70,10 @@ struct KeyboardTheme {
         // Never fully transparent: a clear keyboard takes no touches (see `UIColor.touchableClear`).
         if let background = c.background, background.alpha >= 0.01 {
             backgroundColor = background.uiColor
+            backdropColor = background.uiColor
         } else {
             backgroundColor = .touchableClear
+            backdropColor = dark ? Self.darkBackdrop : Self.lightBackdrop
         }
     }
 

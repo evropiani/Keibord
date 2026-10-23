@@ -472,8 +472,25 @@ final class KeyboardViewController: UIInputViewController {
         case .light: return false
         case .dark: return true
         case .system:
-            return (textDocumentProxy.keyboardAppearance ?? .default) == .dark || traitCollection.userInterfaceStyle == .dark
+            // An app may ask for a light or a dark keyboard; otherwise the iPhone's appearance decides. The
+            // keyboard's own trait collection is only a fallback: it could stay dark in light mode.
+            switch textDocumentProxy.keyboardAppearance ?? .default {
+            case .dark: return true
+            case .light: return false
+            default:
+                let system = UIScreen.main.traitCollection.userInterfaceStyle
+                return system == .unspecified ? traitCollection.userInterfaceStyle == .dark : system == .dark
+            }
         }
+    }
+
+    /// The system draws the keyboard's backdrop in its own light/dark style (the keyboard's trait
+    /// collection), whatever the theme is. When they differ (Light or Dark chosen in the app, or the
+    /// system's style is off), Keibord draws its own backdrop, so keys never sit on the wrong background
+    /// (white keys on black).
+    private func backgroundColor(for theme: KeyboardTheme) -> UIColor {
+        let systemBackdropDark = traitCollection.userInterfaceStyle == .dark
+        return theme.isDark == systemBackdropDark ? theme.backgroundColor : theme.backdropColor
     }
 
     private var isLandscape: Bool { traitCollection.verticalSizeClass == .compact }
@@ -535,7 +552,7 @@ final class KeyboardViewController: UIInputViewController {
     private func render() {
         guard controller != nil else { return }
         let theme = currentTheme()
-        view.backgroundColor = theme.backgroundColor // never fully clear: see `UIColor.touchableClear`
+        view.backgroundColor = backgroundColor(for: theme) // never fully clear: see `UIColor.touchableClear`
         let baseMetrics = KeyboardMetrics.standard(height: settings.appearance.keyHeight, landscape: isLandscape)
         let field = controller.field
         let searching = mode == .emojiSearch
