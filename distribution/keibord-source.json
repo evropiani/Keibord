@@ -22,12 +22,12 @@
       "screenshots": [],
       "versions": [
         {
-          "version": "1.0.9",
-          "buildVersion": "10",
-          "date": "2026-10-23T22:11:33Z",
-          "localizedDescription": "Keibord 1.0.9: export and import exactly what you want.\n\n- Data → Export All saves your typing data, all settings and your details in one file.\n- Export Selected: switches for Typing Data, All Settings and My Details & Text Replacements – for example only your settings (languages, layouts, appearance, colours, tinted keys and every option) to set up another iPhone the same way.\n- Import shows what a file contains: Import All, or switch parts off and Import Selected. Typing data can be merged with what this iPhone learned or replace it. Only what you import changes – a settings file never touches what Keibord has learned.",
+          "version": "1.0.10",
+          "buildVersion": "11",
+          "date": "2026-10-23T22:48:24Z",
+          "localizedDescription": "Keibord 1.0.10: importing a backup works again.\n\n- Data → Import: tapping an exported file in the file picker now opens it. Before, on some iPhones the picker stayed open and nothing happened (an iOS bug in the picker SwiftUI provides; Keibord now uses the UIKit picker).\n- Any file can be chosen, even one that lost its \".json\" ending when it was sent or saved; Keibord checks the content and tells you if it is not a Keibord backup.",
           "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
-          "size": 17954625,
+          "size": 17959144,
           "minOSVersion": "17.0"
         }
       ],
@@ -37,11 +37,11 @@
         ],
         "privacy": {}
       },
-      "version": "1.0.9",
-      "versionDate": "2026-10-23T22:11:33Z",
-      "versionDescription": "Keibord 1.0.9: export and import exactly what you want.\n\n- Data → Export All saves your typing data, all settings and your details in one file.\n- Export Selected: switches for Typing Data, All Settings and My Details & Text Replacements – for example only your settings (languages, layouts, appearance, colours, tinted keys and every option) to set up another iPhone the same way.\n- Import shows what a file contains: Import All, or switch parts off and Import Selected. Typing data can be merged with what this iPhone learned or replace it. Only what you import changes – a settings file never touches what Keibord has learned.",
+      "version": "1.0.10",
+      "versionDate": "2026-10-23T22:48:24Z",
+      "versionDescription": "Keibord 1.0.10: importing a backup works again.\n\n- Data → Import: tapping an exported file in the file picker now opens it. Before, on some iPhones the picker stayed open and nothing happened (an iOS bug in the picker SwiftUI provides; Keibord now uses the UIKit picker).\n- Any file can be chosen, even one that lost its \".json\" ending when it was sent or saved; Keibord checks the content and tells you if it is not a Keibord backup.",
       "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
-      "size": 17954625
+      "size": 17959144
     }
   ],
   "news": []
