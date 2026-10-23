@@ -96,6 +96,11 @@ final class KeyboardViewTouchTests: XCTestCase {
         down(t)
         up(t)
     }
+    private func tap(at p: CGPoint) {
+        let t = touch(at: p)
+        down(t)
+        up(t)
+    }
     private func wait(_ seconds: TimeInterval) { RunLoop.current.run(until: Date().addingTimeInterval(seconds)) }
 
     // MARK: Rollover
@@ -134,6 +139,20 @@ final class KeyboardViewTouchTests: XCTestCase {
         move(t, to: point("s"))
         up(t)
         XCTAssertEqual(recorder.actions, ["char:s"])
+    }
+
+    func testLikelyNextLetterTakesTheEdgeOfItsNeighbourAndKeepsIt() {
+        setUpKeyboard(request())
+        let w = point("w"), e = point("e")
+        let edge = CGPoint(x: w.x + 0.42 * (e.x - w.x), y: w.y) // on "w", towards "e"
+        tap(at: edge)
+        keyboard.letterPrior = ["e": -0.05] // after "ther"
+        let t = touch(at: edge)
+        down(t)
+        move(t, to: CGPoint(x: edge.x - 1, y: edge.y)) // a jitter must not slide back to "w"
+        up(t)
+        tap(at: w) // the middle of "w" always types "w"
+        XCTAssertEqual(recorder.actions, ["char:w", "char:e", "char:w"])
     }
 
     func testQuickTapCancelledByTheSystemStillTypes() {

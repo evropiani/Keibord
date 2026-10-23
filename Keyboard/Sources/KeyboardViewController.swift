@@ -87,6 +87,8 @@ final class KeyboardViewController: UIInputViewController {
     private var userModelGeneration = 0
     private var cachedTheme: (generation: Int, dark: Bool, theme: KeyboardTheme)?
     private var cachedOffsets: (id: String, offsets: [String: (dx: Double, dy: Double)])?
+    /// Next-letter prediction for the current word (recomputed when the word or the languages change).
+    private var cachedLetterPrior: (key: String, prior: [String: Double])?
 
     private static let barHeight: CGFloat = 44
     /// An unlocked card stays usable (in memory) for 3 minutes.
@@ -498,6 +500,19 @@ final class KeyboardViewController: UIInputViewController {
         return layout
     }
 
+    /// Smart touch zones: the likely next letters get larger invisible hit zones (letters page, prose
+    /// fields only; never in URL, e-mail or password fields).
+    private func letterPrior(for page: LayoutPage) -> [String: Double] {
+        guard settings.predictiveTouch, mode == .keys, page == .letters, controller.field.autocorrectAllowed else { return [:] }
+        let word = controller.currentWord
+        let languages = controller.languages
+        let key = word + "\u{1}" + languages.map(\.rawValue).joined(separator: ",") + "\u{1}\(userModelGeneration)"
+        if let cached = cachedLetterPrior, cached.key == key { return cached.prior }
+        let prior = engine.nextLetterLog2Probabilities(after: word, languages: languages)
+        cachedLetterPrior = (key: key, prior: prior)
+        return prior
+    }
+
     private func touchOffsets(for layout: KeyboardLayout) -> (id: String, offsets: [String: (dx: Double, dy: Double)]) {
         guard settings.adaptiveTouch else { return (id: "off", offsets: [:]) }
         let id = "\(layout.touchModelKey)#\(userModelGeneration)"
@@ -559,6 +574,7 @@ final class KeyboardViewController: UIInputViewController {
             keyboardView.languages = settings.activeLanguages
             // While searching emoji, keys type into the query: no trackpad, and letters arrive lower-case.
             keyboardView.spacebarCursor = settings.spacebarCursor && !searching
+            keyboardView.letterPrior = letterPrior(for: request.page)
             keyboardView.configure(layout: layout, metrics: Self.metrics(baseMetrics, rows: layout.rows.count, filling: rows),
                                    theme: theme, shiftState: searching ? .off : controller.shiftState,
                                    spaceLabel: spaceLabel, returnEnabled: searching || !(field.enablesReturnKeyAutomatically && empty),

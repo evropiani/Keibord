@@ -155,6 +155,9 @@ final class KeyboardView: UIView {
     private var keyViews: [Int: KeyView] = [:]
     private var resolver: TouchResolver?
     private var laidOutWidth: CGFloat = 0
+    /// Next-letter prediction (log2 P by lower-case letter) that reshapes the invisible hit zones of the
+    /// letter keys, as on the iPhone keyboard; empty = geometry (and the learned offsets) only.
+    var letterPrior: [String: Double] = [:]
     /// `metrics` fitted into the current height (see `KeyboardMetrics.fitted(toHeight:rows:)`).
     private var laidOutMetrics: KeyboardMetrics?
 
@@ -434,7 +437,8 @@ final class KeyboardView: UIView {
             if trackpadActive, tracked.values.contains(where: { $0.mode == .trackpad }) { continue }
             commitPendingTaps()
             let point = touch.location(in: self)
-            guard let resolver = resolver, let hit = resolver.resolve(point), frames.indices.contains(hit.frameIndex) else { continue }
+            guard let resolver = resolver, let hit = resolver.resolve(point, letterLog2Prior: letterPrior),
+                  frames.indices.contains(hit.frameIndex) else { continue }
             let key = frames[hit.frameIndex].key
             touchCounter += 1
             let t = Tracked(frameIndex: hit.frameIndex, key: key, tap: hit.tap, order: touchCounter)
@@ -558,7 +562,7 @@ final class KeyboardView: UIView {
                     if let event = event { delegate?.keyboardView(self, globeTouchedWith: event, in: self) }
                     continue
                 }
-                guard t.key.style == .character, let hit = resolver?.resolve(point), hit.frameIndex != t.frameIndex,
+                guard t.key.style == .character, let hit = resolver?.resolve(point, letterLog2Prior: letterPrior), hit.frameIndex != t.frameIndex,
                       frames.indices.contains(hit.frameIndex), frames[hit.frameIndex].key.style == .character else { continue }
                 // Slide to a neighbouring character key.
                 let key = frames[hit.frameIndex].key

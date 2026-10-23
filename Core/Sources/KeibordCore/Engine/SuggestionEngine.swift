@@ -308,6 +308,28 @@ public final class SuggestionEngine: SuggestionProviding {
         return raw(language) - best + 1
     }
 
+    /// Next-letter prediction for the touch zones: log2 P(next character | `word` typed so far) over the
+    /// enabled languages (weighted by their priors) and the user's own words, by lower-case character.
+    /// Each branch counts with its most frequent word. Empty when no known word starts with `word`, so
+    /// unknown words (names, slang) are typed by geometry alone.
+    public func nextLetterLog2Probabilities(after word: String, languages: [KeyboardLanguage]) -> [String: Double] {
+        let key = TextUnits.lookupKey(word)
+        var mass: [String: Double] = [:]
+        func add(_ lex: WordLexicon, weight: Double) {
+            for (letter, zipf) in lex.nextLetters(prefix: key) {
+                mass[String(letter), default: 0] += pow(10, zipf) * weight
+            }
+        }
+        for language in languages {
+            guard let lex = lexicon(for: language) else { continue }
+            add(lex, weight: pow(2, prior(language, languages)))
+        }
+        if let user = userLexicon { add(user, weight: 2) }
+        let total = mass.values.reduce(0, +)
+        guard total > 0, total.isFinite else { return [:] }
+        return mass.mapValues { log2($0 / total) }
+    }
+
     /// Successors of `previous` in one lexicon (bigrams are keyed by the first, most frequent form of a key).
     private func successors(_ lex: WordLexicon, previous: String, limit: Int) -> [(id: Int, log2Prob: Double)] {
         guard let id = lex.lookup(key: TextUnits.lookupKey(previous)).first else { return [] }

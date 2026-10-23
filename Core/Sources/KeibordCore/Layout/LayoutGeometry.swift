@@ -240,6 +240,59 @@ public struct TouchResolver {
                         touchModelKey: touchModelKey)
     }
 
+    // MARK: Predictive touch zones
+
+    /// How strongly the next-letter prediction reshapes the invisible hit zones.
+    public struct Prediction: Hashable, Sendable {
+        /// Around this much of a key's centre (normalised distance) a tap always types the drawn key.
+        public var core: Double
+        /// A predicted letter can take over a tap at most this far from its own (offset-adjusted) centre.
+        public var reach: Double
+        /// Weight of the prediction (log2 P) against the spatial evidence (bits).
+        public var weight: Double
+        /// Letters the prediction does not list (no known word continues with them) count as this likely.
+        public var floor: Double
+
+        public init(core: Double = 0.3, reach: Double = 0.9, weight: Double = 0.6, floor: Double = -10) {
+            self.core = core
+            self.reach = reach
+            self.weight = weight
+            self.floor = floor
+        }
+
+        public static let standard = Prediction()
+    }
+
+    public func resolve(_ point: CGPoint, letterLog2Prior prior: [String: Double],
+                        prediction p: Prediction = .standard) -> (frameIndex: Int, tap: TapInput)? {
+        guard let geometric = resolve(point) else { return nil }
+        let hit = frames[geometric.frameIndex]
+        guard !prior.isEmpty, Self.isLetter(hit),
+              normalizedDistance(point, hit, adjusted: true).d > p.core else { return geometric }
+        func likelihood(_ letter: String) -> Double {
+            p.weight * max(p.floor, min(0, prior[letter] ?? p.floor))
+        }
+        var best = (score: likelihood(hit.key.id), position: geometric.frameIndex, cost: 0.0)
+        for candidate in geometric.tap.candidates.dropFirst() {
+            guard let position = letterPositions.first(where: { frames[$0].key.id == candidate.character }),
+                  normalizedDistance(point, frames[position], adjusted: true).d <= p.reach else { continue }
+            let score = likelihood(candidate.character) - candidate.cost
+            if score > best.score { best = (score, position, candidate.cost) }
+        }
+        guard best.position != geometric.frameIndex else { return geometric }
+        let chosen = frames[best.position].key.id
+        var candidates = geometric.tap.candidates.map { c -> TapCandidate in
+            var c = c
+            c.cost = max(0, c.cost - best.cost)
+            return c
+        }
+        if let i = candidates.firstIndex(where: { $0.character == chosen }) {
+            let c = candidates.remove(at: i)
+            candidates.insert(c, at: 0)
+        }
+        return (best.position, TapInput(candidates: candidates, touchModelKey: touchModelKey))
+    }
+
     /// A tap at the centre of the key for `character` (used when no real touch is available).
     public func syntheticTap(for character: String) -> TapInput {
         let c = character.lowercased()

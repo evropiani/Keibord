@@ -61,9 +61,14 @@ public protocol WordLexicon: AnyObject {
     func successors(of id: Int, limit: Int) -> [(id: Int, log2Prob: Double)]
     /// Most frequent words overall (fallback predictions).
     func topWords(limit: Int) -> [Int]
+    /// Characters that can follow `prefix` (a lookup key) in some word, with the Zipf frequency of the
+    /// most frequent word continuing that way (next-letter prediction for the touch zones).
+    func nextLetters(prefix: String) -> [(letter: Character, zipf: Double)]
 }
 
 public extension WordLexicon {
+    func nextLetters(prefix: String) -> [(letter: Character, zipf: Double)] { [] }
+
     /// log2 P(word) derived from the Zipf frequency.
     func log2Prob(_ id: Int) -> Double {
         (zipf(id) - 9) * 3.321928094887362

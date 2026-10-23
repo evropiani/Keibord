@@ -66,6 +66,10 @@ public final class BinaryLexicon: WordLexicon, Sendable {
     public func topWords(limit: Int) -> [Int] {
         withTrie { TrieSearch.topWords($0, limit: limit) }
     }
+
+    public func nextLetters(prefix: String) -> [(letter: Character, zipf: Double)] {
+        withTrie { TrieSearch.nextLetters($0, prefix: prefix) }
+    }
 }
 
 /// Unaligned little-endian reads of the `.kbdl` sections inside a buffer whose header was checked.

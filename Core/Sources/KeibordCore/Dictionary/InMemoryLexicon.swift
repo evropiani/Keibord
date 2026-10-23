@@ -53,4 +53,8 @@ public final class InMemoryLexicon: WordLexicon, Sendable {
     public func topWords(limit: Int) -> [Int] {
         TrieSearch.topWords(tables, limit: limit)
     }
+
+    public func nextLetters(prefix: String) -> [(letter: Character, zipf: Double)] {
+        TrieSearch.nextLetters(tables, prefix: prefix)
+    }
 }

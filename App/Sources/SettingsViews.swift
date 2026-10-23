@@ -38,12 +38,13 @@ struct SettingsView: View {
                 Toggle("Learn New Words", isOn: $model.settings.learnWords)
                 Toggle("Incognito (pause learning)", isOn: $model.settings.incognito)
                 Toggle("Adapt to My Typing (touch model)", isOn: $model.settings.adaptiveTouch)
+                Toggle("Smart Touch Zones (predict the next letter)", isOn: $model.settings.predictiveTouch)
                 NavigationLink("Dictionary") { DictionaryView() }
                 NavigationLink("Text Replacements") { ShortcutsView() }
             } header: {
                 Text("Learning")
             } footer: {
-                Text("Everything Keibord learns stays on this iPhone. Export it under Data to move to a new device.")
+                Text("Smart touch zones: like the iPhone keyboard, the letters you are likely to type next get a larger invisible tap area; a tap on the middle of a key always types it. Everything Keibord learns stays on this iPhone. Export it under Data to move to a new device.")
             }
             Section {
                 Toggle("Suggest My Details", isOn: $model.settings.autofillSuggestions)

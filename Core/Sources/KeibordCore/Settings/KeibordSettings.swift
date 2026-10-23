@@ -110,6 +110,8 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
     public var incognito: Bool = false
     /// Learn where you tap each key and adapt the hit areas.
     public var adaptiveTouch: Bool = true
+    /// Invisible hit zones that grow for the letters likely to come next (like the iPhone keyboard).
+    public var predictiveTouch: Bool = true
 
     // MARK: AutoFill
     public var autofillSuggestions: Bool = true
@@ -146,7 +148,7 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case version, enabledLanguages, layoutOverrides, multilingualTyping, quoteStyleOverrides
         case autocorrect, autoCapitalization, predictiveText, doubleSpacePeriod, smartQuotes, smartPunctuationSpacing
-        case accentRestoration, capsLock, spacebarCursor, learnWords, incognito, adaptiveTouch
+        case accentRestoration, capsLock, spacebarCursor, learnWords, incognito, adaptiveTouch, predictiveTouch
         case autofillSuggestions, cardSuggestions, oneTimeCodeHint
         case haptics, keySound, keyPopups, appearance
     }
@@ -179,6 +181,7 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
         learnWords = c.value(.learnWords, default: d.learnWords)
         incognito = c.value(.incognito, default: d.incognito)
         adaptiveTouch = c.value(.adaptiveTouch, default: d.adaptiveTouch)
+        predictiveTouch = c.value(.predictiveTouch, default: d.predictiveTouch)
         autofillSuggestions = c.value(.autofillSuggestions, default: d.autofillSuggestions)
         cardSuggestions = c.value(.cardSuggestions, default: d.cardSuggestions)
         oneTimeCodeHint = c.value(.oneTimeCodeHint, default: d.oneTimeCodeHint)
@@ -207,6 +210,7 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
         try c.encode(learnWords, forKey: .learnWords)
         try c.encode(incognito, forKey: .incognito)
         try c.encode(adaptiveTouch, forKey: .adaptiveTouch)
+        try c.encode(predictiveTouch, forKey: .predictiveTouch)
         try c.encode(autofillSuggestions, forKey: .autofillSuggestions)
         try c.encode(cardSuggestions, forKey: .cardSuggestions)
         try c.encode(oneTimeCodeHint, forKey: .oneTimeCodeHint)

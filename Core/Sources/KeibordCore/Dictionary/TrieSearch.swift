@@ -220,6 +220,18 @@ enum TrieSearch {
         return result
     }
 
+    /// The characters that can follow `prefix` (a lookup key) in some word, each with the Zipf frequency
+    /// of the most frequent word down that branch (stored per node, so this costs one walk down the trie).
+    static func nextLetters<T: TrieNodeAccess>(_ trie: T, prefix: String) -> [(letter: Character, zipf: Double)] {
+        guard let units = LexiconKey.units(prefix), let node = findNode(trie, units: units) else { return [] }
+        var result: [(letter: Character, zipf: Double)] = []
+        for child in trie.children(of: node) {
+            guard let scalar = Unicode.Scalar(UInt32(trie.nodeUnit(child))) else { continue }
+            result.append((Character(scalar), LexiconFormat.zipf(fromByte: trie.nodeMaxZipf(child))))
+        }
+        return result
+    }
+
     static func successors<T: TrieNodeAccess>(_ trie: T, of id: Int, limit: Int) -> [(id: Int, log2Prob: Double)] {
         guard limit > 0, id >= 0, id < trie.wordCount else { return [] }
         let start = min(trie.bigramStart(id), trie.bigramCount)

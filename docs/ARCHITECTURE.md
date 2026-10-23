@@ -300,6 +300,13 @@ Probabilistic model, everything in **bits** (log2):
   1.6 with cost `= 2.5 · (d² − d_hit²) · log2(e)` (bits), each with its `dx/dy` relative to that key.
   `func syntheticTap(for character: String) -> TapInput` returns the key and its neighbours with
   distance-based costs (used when the controller has text but no taps).
+  **Smart touch zones** (`resolve(_:letterLog2Prior:prediction:)`, setting `predictiveTouch`): as on the
+  iPhone keyboard, the invisible hit zones of the letters likely to come next grow. The keyboard passes
+  `SuggestionEngine.nextLetterLog2Probabilities(after: currentWord, languages:)` (per next letter, the most
+  frequent word down that trie branch, over the enabled languages by prior and the user's words; empty when
+  no known word starts with the typed letters). A tap outside a key's core (`Prediction.core`) goes to the
+  neighbour within `reach` that maximises `weight · log2 P − spatial cost`; the tap then lists the chosen
+  letter first and spatial costs relative to it. Letters page in prose fields only.
 
 ## 7. Input controller (Core/Input) — work package D
 
