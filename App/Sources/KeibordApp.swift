@@ -45,6 +45,20 @@ struct HomeView: View {
 
     private var keyboardSeen: Bool { model.state.lastActive != nil }
 
+    private var fullAccessDetail: String {
+        if model.state.hasFullAccess { return "Learning, sync with this app and haptics work" }
+        if keyboardSeen { return "Off: settings and details changed here cannot reach the keyboard" }
+        return "Not confirmed yet. Without Full Access, nothing you change here reaches the keyboard. "
+            + "Turn it on below, then open the keyboard once. Still orange? See Shared storage."
+    }
+
+    private var sharedStorageDetail: String {
+        if !model.store.isShared { return "This app has no app group: reinstall Keibord with app groups (Data → Diagnostics)" }
+        if keyboardSeen { return "App and keyboard share data" }
+        return "Not confirmed: the keyboard has not reported here yet. If Full Access is on and this stays "
+            + "orange, your installer gave the app and the keyboard different app groups: reinstall with app groups kept."
+    }
+
     var body: some View {
         List {
             Section {
@@ -65,10 +79,9 @@ struct HomeView: View {
                 StatusRow(title: "Keyboard enabled", ok: keyboardSeen,
                           detail: model.state.lastActive.map { "Last used \($0.formatted(date: .abbreviated, time: .shortened))" }
                             ?? "Not used yet (without Full Access the keyboard cannot report here)")
-                StatusRow(title: "Full Access", ok: model.state.hasFullAccess,
-                          detail: model.state.hasFullAccess ? "Learning, sync with this app and haptics work" : "Needed for learning, settings sync, cards and haptics")
-                StatusRow(title: "Shared storage", ok: model.store.isShared,
-                          detail: model.store.isShared ? "App and keyboard share data" : "App group unavailable — see Data → Diagnostics")
+                StatusRow(title: "Full Access", ok: model.state.hasFullAccess, detail: fullAccessDetail)
+                // Only the keyboard's own report proves that both use the same folder.
+                StatusRow(title: "Shared storage", ok: model.store.isShared && keyboardSeen, detail: sharedStorageDetail)
             }
 
             Section("Set up") {

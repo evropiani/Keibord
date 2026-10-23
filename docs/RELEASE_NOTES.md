@@ -1,7 +1,10 @@
-Keibord 1.0.2: the bottom key row is no longer cut off.
+Keibord 1.0.3: settings that reach the keyboard, and the same keyboard height everywhere.
 
-- On iOS 27 the keyboard could stay at the system's default height, which hid most of the bottom row (123, emoji, space, return). Keibord now asks for its height again once it is on screen, and if iOS still gives it less room, the key rows shrink to fit instead of being cut off.
+Settings
+- iOS only lets a keyboard read what its app saved when Full Access is on and the app and keyboard share an app group. When that link is missing, the keyboard now says so in every empty text field ("Allow Full Access to use your settings", or "No link to the Keibord app"); tap the hint for the steps. Before, the hint was hidden behind the first-word suggestions.
+- The app's status explains what is missing instead of showing a green "Shared storage" that only the app itself could see.
 
-Everything from 1.0.1 is included: better autocorrect in all five languages, cleaner dictionaries, hold shift for capitals, landscape safe area, skin-tone pairs for two people and many keyboard and app fixes.
+Keyboard height
+- The keyboard asks for its height the way content-sized keyboards do and asks again whenever iOS lays it out at another height, so it should have the same height in every app. Where iOS still refuses, the rows shrink to fit instead of being cut off.
 
-Install `Keibord.ipa` with Sideloadly/AltStore/SideStore, or use TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data; for a fresh install use Export/Import in the app.
+Install `Keibord.ipa` with your signer, or use TestFlight (docs/INSTALL-NO-PC.md). Your signer must keep the app group for both the app and the keyboard, otherwise settings cannot reach the keyboard. Installing over an earlier version keeps your data.

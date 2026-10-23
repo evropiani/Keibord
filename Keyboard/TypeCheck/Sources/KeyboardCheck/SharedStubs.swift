@@ -17,7 +17,10 @@ final class NSFileCoordinator {
 }
 
 extension FileManager {
-    func containerURL(forSecurityApplicationGroupIdentifier groupIdentifier: String) -> URL? { nil }
+    /// A working app group (one temporary directory per test run), like a correctly signed install.
+    func containerURL(forSecurityApplicationGroupIdentifier groupIdentifier: String) -> URL? {
+        temporaryDirectory.appendingPathComponent("keibord-check-group-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+    }
 }
 
 enum CardBrand: String, Codable, CaseIterable {

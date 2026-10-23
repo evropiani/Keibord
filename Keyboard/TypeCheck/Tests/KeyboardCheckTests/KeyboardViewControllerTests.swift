@@ -54,12 +54,13 @@ final class KeyboardViewControllerTests: XCTestCase {
         CardVault.shared.testCards = []
     }
 
-    private func start(settings: KeibordSettings? = nil, configure: (TestProxy) -> Void = { _ in }) {
+    private func start(settings: KeibordSettings? = nil, fullAccess: Bool = false, configure: (TestProxy) -> Void = { _ in }) {
         if let settings = settings { KeibordStore.shared.saveSettings(settings) }
         proxy = TestProxy()
         configure(proxy)
         vc = KeyboardViewController()
         vc.testProxy = proxy
+        vc.testHasFullAccess = fullAccess
         vc.viewDidLoad()
         vc.viewWillAppear(false)
         vc.viewDidLayoutSubviews()
@@ -369,7 +370,7 @@ final class KeyboardViewControllerTests: XCTestCase {
 
     func testFullAccessHintOnlyWithoutFullAccessAndExpandsOnTap() {
         start()
-        XCTAssertEqual(barTitles, ["Vollen Zugriff erlauben für Lernen & Einstellungen"])
+        XCTAssertEqual(barTitles, ["Vollen Zugriff erlauben, damit deine Einstellungen gelten"])
         let hint = Suggestion(text: "", display: "", kind: .action, appendsSpace: false, payload: "full-access")
         vc.suggestionBar(SuggestionBarView(), didSelect: hint)
         XCTAssertEqual(barTitles, ["Einstellungen › Keibord › Tastaturen › Voller Zugriff"])
@@ -377,6 +378,32 @@ final class KeyboardViewControllerTests: XCTestCase {
         vc.testHasFullAccess = true
         vc.viewWillAppear(false)
         XCTAssertEqual(barTitles, [])
+    }
+
+    func testHintWhenTheAppsSettingsAreMissingFromTheSharedFolder() throws {
+        try? FileManager.default.removeItem(at: KeibordStore.shared.url(.settings))
+        start(fullAccess: true)
+        XCTAssertEqual(barTitles, ["Keibord-App einmal öffnen, damit deine Einstellungen gelten"])
+        type("ha")
+        XCTAssertFalse(barTitles.contains("Keibord-App einmal öffnen, damit deine Einstellungen gelten"), "not while typing a word")
+        KeibordStore.shared.saveSettings(KeibordSettings()) // the app was opened
+        vc.viewWillDisappear(false)
+        vc.viewWillAppear(false)
+        proxy.replaceAll(with: "")
+        vc.textDidChange(nil)
+        XCTAssertEqual(barTitles, [])
+    }
+
+    func testSettingsFromTheAppApplyWhenTheKeyboardAppearsAgain() {
+        start(fullAccess: true)
+        XCTAssertNotEqual(keyboard.layout?.rows.count, 5)
+        var s = KeibordSettings()
+        s.appearance.showNumberRow = true
+        KeibordStore.shared.saveSettings(s)
+        markChangedByTheApp(.settings)
+        vc.viewWillDisappear(false)
+        vc.viewWillAppear(false)
+        XCTAssertEqual(keyboard.layout?.rows.count, 5, "the number row set in the app is shown")
     }
 
     // MARK: Emoji

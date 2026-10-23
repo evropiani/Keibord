@@ -21,8 +21,17 @@ final class KeyboardViewController: UIInputViewController {
     private var emojiSearchBarAdded = false
     private var cardUnlockAdded = false
     private var heightConstraint: NSLayoutConstraint?
+    /// Invisible view pinned to all edges that carries the keyboard's height as well, so the height also
+    /// comes from the content (as with KeyboardKit or Hamster keyboards), not only from the view itself.
+    private let heightSizer = UIView()
+    private var sizerHeightConstraint: NSLayoutConstraint?
     /// Height of the suggestion bar plus the keys, as computed by `render()`.
     private var requestedHeight: CGFloat = 260
+    /// The keyboard has appeared on screen (height requests made before are not always applied).
+    private var appeared = false
+    /// Height requests repeated in this appearance because the system kept another height.
+    private var heightRetries = 0
+    private static let maxHeightRetries = 3
 
     private enum Mode: Equatable { case keys, emoji, emojiSearch, cardUnlock(UUID) }
     private var mode: Mode = .keys
@@ -53,7 +62,9 @@ final class KeyboardViewController: UIInputViewController {
     private var lastSupplementaryRequest: Date?
     /// `hasFullAccess`, read once per appearance (it cannot change while the keyboard is shown).
     private var fullAccess = false
-    private var fullAccessHintExpanded = false
+    /// Why what is set in the Keibord app cannot reach this keyboard (checked once per appearance).
+    private var linkProblem: AppLinkProblem?
+    private var linkHintExpanded = false
     /// The document as of the controller's last update (see `textDidChange`).
     private var documentSnapshot: DocumentSnapshot?
     /// Whether the last render included the globe key (`needsInputModeSwitchKey`).
@@ -107,30 +118,62 @@ final class KeyboardViewController: UIInputViewController {
         suggestionBar.delegate = self
         keyboardView.delegate = self
         keyboardView.inputModeTarget = self
+        heightSizer.isUserInteractionEnabled = false
+        heightSizer.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(heightSizer)
+        NSLayoutConstraint.activate([
+            heightSizer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            heightSizer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            heightSizer.topAnchor.constraint(equalTo: view.topAnchor),
+            heightSizer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
         view.addSubview(suggestionBar)
         view.addSubview(keyboardView)
+        inputView?.allowsSelfSizing = true
 
         installHeightConstraint()
     }
 
-    /// Asks the system for `requestedHeight` with a new height constraint on the keyboard's view.
+    /// Asks the system for `requestedHeight` with new height constraints (on the keyboard's view and on
+    /// the sizer pinned to its edges): replacing them makes the system measure the keyboard again.
     private func installHeightConstraint() {
         heightConstraint?.isActive = false
+        sizerHeightConstraint?.isActive = false
         let h = view.heightAnchor.constraint(equalToConstant: requestedHeight)
         h.priority = UILayoutPriority(999)
         h.isActive = true
         heightConstraint = h
+        let sizer = heightSizer.heightAnchor.constraint(equalToConstant: requestedHeight)
+        sizer.priority = UILayoutPriority(999)
+        sizer.isActive = true
+        sizerHeightConstraint = sizer
+        view.setNeedsUpdateConstraints()
         view.setNeedsLayout()
+    }
+
+    /// The system laid the keyboard out at another height than requested (it applies requests only
+    /// after the keyboard is on screen, and not reliably in every app): ask again a few times, a moment
+    /// later, so the keyboard ends up with the same height in every app.
+    private func requestHeightAgainIfIgnored() {
+        guard appeared, view.bounds.height > 0, abs(view.bounds.height - requestedHeight) > 1,
+              heightRetries < Self.maxHeightRetries else { return }
+        heightRetries += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1 * Double(heightRetries)) { [weak self] in
+            guard let self = self, self.appeared, abs(self.view.bounds.height - self.requestedHeight) > 1 else { return }
+            self.installHeightConstraint()
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         fullAccess = hasFullAccess
+        heightRetries = 0
         // Before reloading: a settings change renders right away (controller delegate), which must not
         // configure the emoji panel (loading the emoji catalog) the keyboard was dismissed in.
         mode = .keys
-        fullAccessHintExpanded = false
+        linkHintExpanded = false
         reloadIfChanged()
+        linkProblem = currentLinkProblem()
         purgeExpiredCards()
         cards = settings.cardSuggestions ? CardVault.shared.cards() : []
         if fullAccess, settings.haptics != .off {
@@ -162,12 +205,15 @@ final class KeyboardViewController: UIInputViewController {
         view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
         // A keyboard can only change its height once it has been drawn on screen; a request made
         // before is not always applied (iOS 27 kept the default height, which cut off the bottom row).
-        // Ask again now. Should the height still fall short, the rows shrink to fit (KeyboardView).
+        // Ask again now (and again if the system still keeps another height). Should the height still
+        // fall short, the rows shrink to fit (KeyboardView).
+        appeared = true
         installHeightConstraint()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        appeared = false
         // A held backspace must not keep deleting once the keyboard goes away.
         keyboardView.cancelAllTouches()
         if emojiPanelAdded { emojiPanel.stopBackspaceRepeat() }
@@ -193,6 +239,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutChildren()
+        requestHeightAgainIfIgnored()
     }
 
     override func viewSafeAreaInsetsDidChange() {
@@ -484,6 +531,7 @@ final class KeyboardViewController: UIInputViewController {
         if searching { total += Self.barHeight }
         requestedHeight = total
         if heightConstraint?.constant != total { heightConstraint?.constant = total }
+        if sizerHeightConstraint?.constant != total { sizerHeightConstraint?.constant = total }
 
         if mode == .keys || searching {
             let offsets = touchOffsets(for: layout)
@@ -576,29 +624,70 @@ final class KeyboardViewController: UIInputViewController {
             }
             return [Suggestion(text: "", display: text, kind: .action, appendsSpace: false, payload: "switch-keyboard")]
         }
-        if !fullAccess, controller.suggestions.isEmpty, controller.currentWord.isEmpty {
-            return [Suggestion(text: "", display: fullAccessHintExpanded ? fullAccessInstructions : fullAccessHint,
+        // What is set in the app does not reach the keyboard: said in every empty field (instead of the
+        // first-word predictions, which hid the hint before) and whenever there is nothing to suggest.
+        if let problem = linkProblem, controller.currentWord.isEmpty, controller.suggestions.isEmpty || documentIsEmpty {
+            return [Suggestion(text: "", display: linkHintExpanded ? Self.linkInstructions(problem, controller.language.languageCode)
+                                                                   : Self.linkHint(problem, controller.language.languageCode),
                                kind: .action, appendsSpace: false, payload: "full-access")]
         }
         return controller.suggestions
     }
 
-    private var fullAccessHint: String {
-        switch controller.language.languageCode {
-        case "de": return "Vollen Zugriff erlauben für Lernen & Einstellungen"
-        case "sq": return "Lejo qasjen e plotë për mësim dhe cilësime"
-        case "it": return "Consenti accesso completo per apprendimento e impostazioni"
-        default: return "Allow Full Access for learning & settings"
+    private var documentIsEmpty: Bool {
+        (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
+    }
+
+    /// Why the settings, details and learning of the Keibord app cannot reach this keyboard.
+    enum AppLinkProblem: Equatable {
+        /// Without Full Access iOS gives a keyboard no access to the container it shares with its app.
+        case fullAccess
+        /// Full Access is on, but the installer gave the keyboard no app group.
+        case noAppGroup
+        /// The shared folder has no settings from the app: the app was never opened, or the installer gave
+        /// the app and the keyboard different app groups.
+        case appDataMissing
+    }
+
+    private func currentLinkProblem() -> AppLinkProblem? {
+        if !fullAccess { return .fullAccess }
+        if !store.isShared { return .noAppGroup }
+        if !store.exists(.settings) { return .appDataMissing }
+        return nil
+    }
+
+    static func linkHint(_ problem: AppLinkProblem, _ language: String) -> String {
+        switch (problem, language) {
+        case (.fullAccess, "de"): return "Vollen Zugriff erlauben, damit deine Einstellungen gelten"
+        case (.fullAccess, "sq"): return "Lejo qasjen e plotë që të vlejnë cilësimet e tua"
+        case (.fullAccess, "it"): return "Consenti l'accesso completo per usare le tue impostazioni"
+        case (.fullAccess, _): return "Allow Full Access to use your settings"
+        case (.noAppGroup, "de"): return "Keine Verbindung zur Keibord-App (App-Gruppe fehlt)"
+        case (.noAppGroup, "sq"): return "Pa lidhje me aplikacionin Keibord (mungon grupi)"
+        case (.noAppGroup, "it"): return "Nessun collegamento all'app Keibord (manca l'App Group)"
+        case (.noAppGroup, _): return "No link to the Keibord app (app group missing)"
+        case (.appDataMissing, "de"): return "Keibord-App einmal öffnen, damit deine Einstellungen gelten"
+        case (.appDataMissing, "sq"): return "Hap aplikacionin Keibord një herë për cilësimet"
+        case (.appDataMissing, "it"): return "Apri l'app Keibord una volta per le tue impostazioni"
+        case (.appDataMissing, _): return "Open the Keibord app once to use your settings"
         }
     }
 
     /// Shown when the hint is tapped (a keyboard extension cannot open Settings itself).
-    private var fullAccessInstructions: String {
-        switch controller.language.languageCode {
-        case "de": return "Einstellungen › Keibord › Tastaturen › Voller Zugriff"
-        case "sq": return "Cilësimet › Keibord › Tastierat › Qasje e plotë"
-        case "it": return "Impostazioni › Keibord › Tastiere › Accesso completo"
-        default: return "Settings › Keibord › Keyboards › Allow Full Access"
+    static func linkInstructions(_ problem: AppLinkProblem, _ language: String) -> String {
+        switch (problem, language) {
+        case (.fullAccess, "de"): return "Einstellungen › Keibord › Tastaturen › Voller Zugriff"
+        case (.fullAccess, "sq"): return "Cilësimet › Keibord › Tastierat › Qasje e plotë"
+        case (.fullAccess, "it"): return "Impostazioni › Keibord › Tastiere › Accesso completo"
+        case (.fullAccess, _): return "Settings › Keibord › Keyboards › Allow Full Access"
+        case (.noAppGroup, "de"), (.appDataMissing, "de"):
+            return "Bleibt das so: neu installieren, sodass App und Tastatur eine App-Gruppe teilen"
+        case (.noAppGroup, "sq"), (.appDataMissing, "sq"):
+            return "Nëse mbetet: instalo përsëri që aplikacioni dhe tastiera të ndajnë një grup"
+        case (.noAppGroup, "it"), (.appDataMissing, "it"):
+            return "Se resta così: reinstalla in modo che app e tastiera condividano un App Group"
+        case (.noAppGroup, _), (.appDataMissing, _):
+            return "Still there? Reinstall so the app and keyboard share an app group"
         }
     }
 
@@ -886,7 +975,7 @@ extension KeyboardViewController: SuggestionBarDelegate {
             if suggestion.payload == "switch-keyboard" {
                 advanceToNextInputMode()
             } else if suggestion.payload == "full-access" {
-                fullAccessHintExpanded.toggle()
+                linkHintExpanded.toggle()
                 render()
             }
         default:

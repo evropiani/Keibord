@@ -49,11 +49,18 @@ final class KeibordStore {
     func readData(_ file: KeibordFile) -> Data? {
         var result: Data?
         var error: NSError?
+        var coordinated = false
         NSFileCoordinator().coordinate(readingItemAt: url(file), options: [], error: &error) { u in
+            coordinated = true
             result = try? Data(contentsOf: u)
         }
+        // The coordinator can be unavailable (it never ran the reader): the files are replaced
+        // atomically, so a plain read still never sees half a file.
+        if !coordinated { result = try? Data(contentsOf: url(file)) }
         return result
     }
+
+    func exists(_ file: KeibordFile) -> Bool { FileManager.default.fileExists(atPath: url(file).path) }
 
     /// Replaces the file atomically. Returns false when nothing was written.
     @discardableResult

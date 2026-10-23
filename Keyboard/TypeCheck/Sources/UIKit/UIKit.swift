@@ -214,7 +214,14 @@ open class NSLayoutConstraint: NSObject {
     open var constant: CGFloat = 0
     open var priority: UILayoutPriority = .required
     open var isActive: Bool = false
+    open class func activate(_ constraints: [NSLayoutConstraint]) { constraints.forEach { $0.isActive = true } }
 }
+/// Edge anchors: constraints are only recorded (the stub has no layout engine).
+open class NSLayoutAnchorStub: NSObject {
+    open func constraint(equalTo anchor: NSLayoutAnchorStub) -> NSLayoutConstraint { NSLayoutConstraint() }
+}
+public typealias NSLayoutXAxisAnchor = NSLayoutAnchorStub
+public typealias NSLayoutYAxisAnchor = NSLayoutAnchorStub
 open class NSLayoutDimension: NSObject {
     /// Test-only: constraints created from this anchor.
     public private(set) var testConstraints: [NSLayoutConstraint] = []
@@ -270,6 +277,11 @@ open class UIView: UIResponder {
     open var traitCollection: UITraitCollection { UITraitCollection() }
     private let heightDimension = NSLayoutDimension()
     open var heightAnchor: NSLayoutDimension { heightDimension }
+    open var translatesAutoresizingMaskIntoConstraints = true
+    open var leadingAnchor: NSLayoutXAxisAnchor { NSLayoutAnchorStub() }
+    open var trailingAnchor: NSLayoutXAxisAnchor { NSLayoutAnchorStub() }
+    open var topAnchor: NSLayoutYAxisAnchor { NSLayoutAnchorStub() }
+    open var bottomAnchor: NSLayoutYAxisAnchor { NSLayoutAnchorStub() }
     open var gestureRecognizers: [UIGestureRecognizer]?
     open func addSubview(_ view: UIView) {
         view.removeFromSuperview()
@@ -297,6 +309,7 @@ open class UIView: UIResponder {
         children.insert(view, at: min(max(index, 0), children.count))
     }
     open func setNeedsLayout() { needsLayout = true }
+    open func setNeedsUpdateConstraints() {}
     open func layoutIfNeeded() {
         guard needsLayout else { return }
         needsLayout = false
@@ -331,7 +344,9 @@ open class UIView: UIResponder {
     open class func performWithoutAnimation(_ actionsWithoutAnimation: () -> Void) { actionsWithoutAnimation() }
 }
 open class UIWindow: UIView {}
-open class UIInputView: UIView {}
+open class UIInputView: UIView {
+    open var allowsSelfSizing = false
+}
 
 open class UILabel: UIView {
     open var text: String?

@@ -53,6 +53,8 @@ final class AppModel: ObservableObject {
         state = store.loadState()
         cards = CardVault.shared.cards()
         reloadUserModel(force: true)
+        // The keyboard tells "app never opened / other app group" from "connected" by this file.
+        if !store.exists(.settings) { store.saveSettings(loadedSettings) }
     }
 
     // MARK: Settings & details
