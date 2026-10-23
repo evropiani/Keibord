@@ -22,12 +22,12 @@
       "screenshots": [],
       "versions": [
         {
-          "version": "1.0.8",
-          "buildVersion": "9",
-          "date": "2026-10-23T21:13:32Z",
-          "localizedDescription": "Keibord 1.0.8: a tighter suggestion bar.\n\n- Less empty space above the keys: the suggestion bar is lower, and its words sit centred between the keyboard's top edge and the first key row (iOS adds its own padding above the bar, which made the words look too low).",
+          "version": "1.0.9",
+          "buildVersion": "10",
+          "date": "2026-10-23T22:11:33Z",
+          "localizedDescription": "Keibord 1.0.9: export and import exactly what you want.\n\n- Data → Export All saves your typing data, all settings and your details in one file.\n- Export Selected: switches for Typing Data, All Settings and My Details & Text Replacements – for example only your settings (languages, layouts, appearance, colours, tinted keys and every option) to set up another iPhone the same way.\n- Import shows what a file contains: Import All, or switch parts off and Import Selected. Typing data can be merged with what this iPhone learned or replace it. Only what you import changes – a settings file never touches what Keibord has learned.",
           "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
-          "size": 17931049,
+          "size": 17954625,
           "minOSVersion": "17.0"
         }
       ],
@@ -37,11 +37,11 @@
         ],
         "privacy": {}
       },
-      "version": "1.0.8",
-      "versionDate": "2026-10-23T21:13:32Z",
-      "versionDescription": "Keibord 1.0.8: a tighter suggestion bar.\n\n- Less empty space above the keys: the suggestion bar is lower, and its words sit centred between the keyboard's top edge and the first key row (iOS adds its own padding above the bar, which made the words look too low).",
+      "version": "1.0.9",
+      "versionDate": "2026-10-23T22:11:33Z",
+      "versionDescription": "Keibord 1.0.9: export and import exactly what you want.\n\n- Data → Export All saves your typing data, all settings and your details in one file.\n- Export Selected: switches for Typing Data, All Settings and My Details & Text Replacements – for example only your settings (languages, layouts, appearance, colours, tinted keys and every option) to set up another iPhone the same way.\n- Import shows what a file contains: Import All, or switch parts off and Import Selected. Typing data can be merged with what this iPhone learned or replace it. Only what you import changes – a settings file never touches what Keibord has learned.",
       "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
-      "size": 17931049
+      "size": 17954625
     }
   ],
   "news": []
