@@ -22,12 +22,12 @@
       "screenshots": [],
       "versions": [
         {
-          "version": "1.0.7",
-          "buildVersion": "8",
-          "date": "2026-10-23T11:36:15Z",
-          "localizedDescription": "Light and dark mode fixed: automatic follows your iPhone again, and light keys never sit on a black background.",
+          "version": "1.0.8",
+          "buildVersion": "9",
+          "date": "2026-10-23T21:13:32Z",
+          "localizedDescription": "Keibord 1.0.8: a tighter suggestion bar.\n\n- Less empty space above the keys: the suggestion bar is lower, and its words sit centred between the keyboard's top edge and the first key row (iOS adds its own padding above the bar, which made the words look too low).",
           "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
-          "size": 17931014,
+          "size": 17931049,
           "minOSVersion": "17.0"
         }
       ],
@@ -37,11 +37,11 @@
         ],
         "privacy": {}
       },
-      "version": "1.0.7",
-      "versionDate": "2026-10-23T11:36:15Z",
-      "versionDescription": "Light and dark mode fixed: automatic follows your iPhone again, and light keys never sit on a black background.",
+      "version": "1.0.8",
+      "versionDate": "2026-10-23T21:13:32Z",
+      "versionDescription": "Keibord 1.0.8: a tighter suggestion bar.\n\n- Less empty space above the keys: the suggestion bar is lower, and its words sit centred between the keyboard's top edge and the first key row (iOS adds its own padding above the bar, which made the words look too low).",
       "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
-      "size": 17931014
+      "size": 17931049
     }
   ],
   "news": []
