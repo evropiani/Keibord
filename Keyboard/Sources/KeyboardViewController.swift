@@ -520,7 +520,7 @@ final class KeyboardViewController: UIInputViewController {
     private func render() {
         guard controller != nil else { return }
         let theme = currentTheme()
-        view.backgroundColor = theme.backgroundColor
+        view.backgroundColor = theme.backgroundColor // never fully clear: see `UIColor.touchableClear`
         let baseMetrics = KeyboardMetrics.standard(height: settings.appearance.keyHeight, landscape: isLandscape)
         let field = controller.field
         let searching = mode == .emojiSearch

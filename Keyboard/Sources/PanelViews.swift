@@ -24,6 +24,7 @@ final class SuggestionBarView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        backgroundColor = .touchableClear // empty areas must take touches too
         highlight.isUserInteractionEnabled = false
         addSubview(highlight)
         for i in 0..<3 {
@@ -185,7 +186,8 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         flow.sectionInset = UIEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
         collection = UICollectionView(frame: .zero, collectionViewLayout: flow)
         super.init(frame: frame)
-        collection.backgroundColor = .clear
+        backgroundColor = .touchableClear // empty areas must take touches too
+        collection.backgroundColor = .touchableClear // scrolling starts between emoji too
         collection.showsHorizontalScrollIndicator = false
         collection.register(EmojiCell.self, forCellWithReuseIdentifier: "e")
         collection.dataSource = self
@@ -430,6 +432,7 @@ final class EmojiSearchBarView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        backgroundColor = .touchableClear // empty areas must take touches too
         field.layer.cornerRadius = 9
         field.layer.masksToBounds = true
         addSubview(field)
@@ -506,6 +509,7 @@ final class CardUnlockView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        backgroundColor = .touchableClear // empty areas must take touches too
         title.textAlignment = .center
         title.font = .systemFont(ofSize: 15, weight: .semibold)
         dots.textAlignment = .center
