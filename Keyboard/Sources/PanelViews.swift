@@ -13,6 +13,14 @@ final class SuggestionBarView: UIView {
     private var separators: [UIView] = []
     private var highlight = UIView()
     private var items: [Suggestion] = []
+    /// The slot under the finger. The bar tracks touches itself: every slot is tappable across its whole
+    /// third of the bar (gaps and separators included), not only on the drawn word.
+    private var pressedSlot: Int? {
+        didSet {
+            guard pressedSlot != oldValue else { return }
+            for (i, b) in buttons.enumerated() { b.isHighlighted = i == pressedSlot }
+        }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -24,7 +32,7 @@ final class SuggestionBarView: UIView {
             b.titleLabel?.adjustsFontSizeToFitWidth = true
             b.titleLabel?.minimumScaleFactor = 0.6
             b.titleLabel?.lineBreakMode = .byTruncatingMiddle
-            b.addTarget(self, action: #selector(tapped(_:)), for: .touchUpInside)
+            b.isUserInteractionEnabled = false // drawn only; touches go to the bar (see `slot(at:)`)
             addSubview(b)
             buttons.append(b)
         }
@@ -49,6 +57,7 @@ final class SuggestionBarView: UIView {
         }
         appliedTheme = themeKey
         items = trimmed
+        pressedSlot = nil
         let single = items.count == 1 && (items[0].kind == .action || items[0].kind == .card)
         // System buttons cross-fade title changes; while typing that makes the bar flicker.
         UIView.performWithoutAnimation {
@@ -92,9 +101,36 @@ final class SuggestionBarView: UIView {
         }
     }
 
-    @objc private func tapped(_ sender: UIButton) {
-        guard sender.tag < items.count else { return }
-        delegate?.suggestionBar(self, didSelect: items[sender.tag])
+    /// The slot a point belongs to: the whole bar for a single item, otherwise its third of the bar
+    /// (as laid out by `layoutSubviews`), at any height of the bar.
+    func slot(at point: CGPoint) -> Int? {
+        guard !items.isEmpty, point.x >= 0, point.x <= bounds.width, bounds.width > 0 else { return nil }
+        if items.count == 1 { return 0 }
+        let index = min(2, max(0, Int(point.x / (bounds.width / 3))))
+        return index < items.count ? index : nil
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        pressedSlot = slot(at: touch.location(in: self))
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first, pressedSlot != nil else { return }
+        let p = touch.location(in: self)
+        // Like a button: sliding far off the slot cancels the tap, sliding back restores it.
+        pressedSlot = p.y < -40 || p.y > bounds.height + 40 ? nil : slot(at: p)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        defer { pressedSlot = nil }
+        guard let touch = touches.first, let slot = pressedSlot, slot == self.slot(at: touch.location(in: self)),
+              slot < items.count else { return }
+        delegate?.suggestionBar(self, didSelect: items[slot])
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        pressedSlot = nil
     }
 }
 
