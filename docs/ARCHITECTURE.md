@@ -478,7 +478,7 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   `.webSearch`→webSearch, `.numberPad`/`.asciiCapableNumberPad`→number, `.decimalPad`→decimal,
   `.phonePad`→phone). Also `autocapitalizationType`, `autocorrectionType`, `smartQuotesType`,
   `returnKeyType`, `enablesReturnKeyAutomatically`, `isSecureTextEntry`, `keyboardAppearance`.
-* **Height**: suggestion bar 44 pt + `metrics.keyboardHeight(rows:)`; set via a height constraint on
+* **Height**: suggestion bar 36 pt (its words 3.5 pt above the middle; iOS pads the keyboard above it; emoji search 88 pt) + `metrics.keyboardHeight(rows:)`; set via a height constraint on
   `view` (priority 999); recompute on rotation (`viewWillTransition`) and on layout changes.
 * **KeyboardView** (single view handling all touches; `isMultipleTouchEnabled = true`): lays out
   `KeyView`s from `LayoutGeometry.frames`, resolves touches through `TouchResolver` (with the

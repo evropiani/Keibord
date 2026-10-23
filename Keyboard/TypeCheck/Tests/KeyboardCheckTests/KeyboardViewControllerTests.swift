@@ -160,6 +160,17 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(subview(SuggestionBarView.self)?.frame.minX, 47)
     }
 
+    func testTheSuggestionBarIsLowAndItsWordsSitAboveItsMiddle() {
+        start()
+        vc.viewDidLayoutSubviews()
+        let bar = subview(SuggestionBarView.self)
+        XCTAssertEqual(bar?.frame.height, 36)
+        XCTAssertEqual(keyboard.frame.minY, 36)
+        bar?.layoutIfNeeded()
+        let word = bar?.subviews.compactMap { $0 as? UIButton }.first
+        XCTAssertEqual(word?.frame.midY ?? 0, 18 - SuggestionBarView.textRaise, accuracy: 0.01)
+    }
+
     func testKeysTypeIntoTheDocumentWithAutoCapitalisation() {
         start()
         type("hallo du")
@@ -463,7 +474,7 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertTrue(keyboard.isHidden)
         vc.emojiPanelDidRequestSearch(panel!)
         let bar = subview(EmojiSearchBarView.self)
-        XCTAssertEqual(height, keysHeight + 44, "the query bar is added on top")
+        XCTAssertEqual(height, keysHeight + 52, "the 88 pt query bar replaces the 36 pt suggestion bar")
         XCTAssertFalse(keyboard.isHidden)
         type("he")
         XCTAssertEqual(proxy.text, "X")

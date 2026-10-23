@@ -90,7 +90,10 @@ final class KeyboardViewController: UIInputViewController {
     /// Next-letter prediction for the current word (recomputed when the word or the languages change).
     private var cachedLetterPrior: (key: String, prior: [String: Double])?
 
-    private static let barHeight: CGFloat = 44
+    /// Suggestion bar: kept low, iOS already pads the keyboard above it.
+    private static let barHeight: CGFloat = 36
+    /// Emoji search: query field and result row (shown instead of the suggestion bar).
+    private static let searchBarHeight: CGFloat = 88
     /// An unlocked card stays usable (in memory) for 3 minutes.
     private static let unlockLifetime: TimeInterval = 180
     /// Learned words/bigrams reach the engine after this much typing pause.
@@ -575,8 +578,7 @@ final class KeyboardViewController: UIInputViewController {
         let isPad = request.variant == .numberPad || request.variant == .decimalPad
         let rows = max(layout.rows.count, isPad ? 4 : (numberRow ? 5 : 4))
         let keysHeight = baseMetrics.keyboardHeight(rows: rows)
-        var total = Self.barHeight + keysHeight
-        if searching { total += Self.barHeight }
+        let total = (searching ? Self.searchBarHeight : Self.barHeight) + keysHeight
         requestedHeight = total
         if heightConstraint?.constant != total { heightConstraint?.constant = total }
         if sizerHeightConstraint?.constant != total { sizerHeightConstraint?.constant = total }
@@ -623,8 +625,8 @@ final class KeyboardViewController: UIInputViewController {
             suggestionBar.frame = CGRect(x: b.minX, y: 0, width: b.width, height: Self.barHeight)
             keyboardView.frame = CGRect(x: b.minX, y: Self.barHeight, width: b.width, height: max(0, b.height - Self.barHeight))
         case .emojiSearch:
-            if emojiSearchBarAdded { emojiSearchBar.frame = CGRect(x: b.minX, y: 0, width: b.width, height: 2 * Self.barHeight) }
-            keyboardView.frame = CGRect(x: b.minX, y: 2 * Self.barHeight, width: b.width, height: max(0, b.height - 2 * Self.barHeight))
+            if emojiSearchBarAdded { emojiSearchBar.frame = CGRect(x: b.minX, y: 0, width: b.width, height: Self.searchBarHeight) }
+            keyboardView.frame = CGRect(x: b.minX, y: Self.searchBarHeight, width: b.width, height: max(0, b.height - Self.searchBarHeight))
         case .emoji:
             if emojiPanelAdded { emojiPanel.frame = b }
         case .cardUnlock:

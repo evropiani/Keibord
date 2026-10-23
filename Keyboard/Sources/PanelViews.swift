@@ -86,19 +86,24 @@ final class SuggestionBarView: UIView {
         setNeedsLayout()
     }
 
+    /// The words sit this much above the bar's middle: iOS pads the keyboard above the bar, while the
+    /// gap to the first key row below it is smaller, so a centred word looked too low.
+    static let textRaise: CGFloat = 3.5
+
     override func layoutSubviews() {
         super.layoutSubviews()
         let count = max(items.count, 1)
         let w = bounds.width / CGFloat(count == 1 ? 1 : 3)
+        let textHeight = max(0, bounds.height - 2 * Self.textRaise)
         for (i, b) in buttons.enumerated() {
             let x: CGFloat = count == 1 ? 0 : CGFloat(i) * w
-            b.frame = CGRect(x: x + 4, y: 0, width: (count == 1 ? bounds.width : w) - 8, height: bounds.height)
+            b.frame = CGRect(x: x + 4, y: 0, width: (count == 1 ? bounds.width : w) - 8, height: textHeight)
         }
         for (i, s) in separators.enumerated() {
-            s.frame = CGRect(x: CGFloat(i + 1) * w, y: bounds.height * 0.25, width: 1 / max(traitCollection.displayScale, 1), height: bounds.height * 0.5)
+            s.frame = CGRect(x: CGFloat(i + 1) * w, y: textHeight * 0.25, width: 1 / max(traitCollection.displayScale, 1), height: textHeight * 0.5)
         }
         if let index = items.firstIndex(where: { $0.isAutocorrect }), index < buttons.count {
-            highlight.frame = buttons[index].frame.insetBy(dx: -2, dy: 6)
+            highlight.frame = buttons[index].frame.insetBy(dx: -2, dy: 2)
         }
     }
 
