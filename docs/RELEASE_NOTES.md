@@ -1,7 +1,6 @@
-Keibord 1.0.9: export and import exactly what you want.
+Keibord 1.0.10: importing a backup works again.
 
-- Data → Export All saves your typing data, all settings and your details in one file.
-- Export Selected: switches for Typing Data, All Settings and My Details & Text Replacements – for example only your settings (languages, layouts, appearance, colours, tinted keys and every option) to set up another iPhone the same way.
-- Import shows what a file contains: Import All, or switch parts off and Import Selected. Typing data can be merged with what this iPhone learned or replace it. Only what you import changes – a settings file never touches what Keibord has learned.
+- Data → Import: tapping an exported file in the file picker now opens it. Before, on some iPhones the picker stayed open and nothing happened (an iOS bug in the picker SwiftUI provides; Keibord now uses the UIKit picker).
+- Any file can be chosen, even one that lost its ".json" ending when it was sent or saved; Keibord checks the content and tells you if it is not a Keibord backup.
 
 Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboard), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.
