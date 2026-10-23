@@ -1,0 +1,19 @@
+name: Update store gist
+
+# Uploads distribution/keibord-source.json (as committed) to the store source gist. Releases do this
+# automatically with the new version; run this by hand after editing the source file.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload the store source
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: python3 tools/update_store_source.py --upload

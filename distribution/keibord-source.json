@@ -6,7 +6,9 @@
   "iconURL": "https://raw.githubusercontent.com/evropiani/Keibord/main/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
   "website": "https://github.com/evropiani/Keibord",
   "tintColor": "#007AFF",
-  "featuredApps": ["com.keibord.app"],
+  "featuredApps": [
+    "com.keibord.app"
+  ],
   "apps": [
     {
       "name": "Keibord",
@@ -30,7 +32,9 @@
         }
       ],
       "appPermissions": {
-        "entitlements": ["com.apple.security.application-groups"],
+        "entitlements": [
+          "com.apple.security.application-groups"
+        ],
         "privacy": {}
       }
     }
