@@ -1,16 +1,19 @@
 import Foundation
 
-/// Contents of an export file. Payment cards are never exported.
+/// Contents of an export file. Each part is optional (the user picks what to export: typing data,
+/// settings, details); an import changes only the parts the file contains. Payment cards are never
+/// exported.
 public struct BackupPayload: Codable, Equatable, Sendable {
     public var formatVersion: Int
     public var createdAt: Date
     public var appVersion: String
-    public var settings: KeibordSettings
-    /// Personal info + shortcuts (optional; the user can exclude it from an export).
+    public var settings: KeibordSettings?
+    /// Personal info + shortcuts.
     public var profile: PersonalProfile?
-    public var userModel: UserModel
+    /// Learned words, word pairs, touch model, emoji history ("typing data").
+    public var userModel: UserModel?
 
-    public init(formatVersion: Int = 1, createdAt: Date, appVersion: String, settings: KeibordSettings, profile: PersonalProfile?, userModel: UserModel) {
+    public init(formatVersion: Int = 1, createdAt: Date, appVersion: String, settings: KeibordSettings?, profile: PersonalProfile?, userModel: UserModel?) {
         self.formatVersion = formatVersion
         self.createdAt = createdAt
         self.appVersion = appVersion
@@ -30,9 +33,10 @@ public struct BackupPayload: Codable, Equatable, Sendable {
         formatVersion = c.value(.formatVersion, default: 1)
         createdAt = c.value(.createdAt, default: Date(timeIntervalSince1970: 0))
         appVersion = c.value(.appVersion, default: "")
-        settings = c.value(.settings, default: KeibordSettings())
+        // A part that is present but damaged decodes as empty (as before); a missing part stays nil.
+        settings = c.contains(.settings) ? c.value(.settings, default: KeibordSettings()) : nil
         profile = c.optionalValue(.profile, as: PersonalProfile.self)
-        userModel = c.value(.userModel, default: UserModel())
+        userModel = c.contains(.userModel) ? c.value(.userModel, default: UserModel()) : nil
     }
 }
 

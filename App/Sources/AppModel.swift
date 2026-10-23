@@ -208,16 +208,21 @@ final class AppModel: ObservableObject {
 
     /// Builds an export file in the background from the saved data (not the copy shown in the app).
     /// An empty password means "not encrypted".
-    func makeBackup(includePersonal: Bool, password: String?, completion: @escaping (Result<Data, Error>) -> Void) {
+    func makeBackup(includeTypingData: Bool, includeSettings: Bool, includePersonal: Bool, password: String?,
+                    completion: @escaping (Result<Data, Error>) -> Void) {
         saveNow()
-        let settings = self.settings
+        let settings: KeibordSettings? = includeSettings ? self.settings : nil
         let profile: PersonalProfile? = includePersonal ? self.profile : nil
         let version = KeibordVersion.display
         let store = self.store
         performInBackground {
             let result: Result<Data, Error> = Result {
-                // Never export an empty model in place of learned data that merely cannot be read now.
-                guard let userModel = store.loadUserModelIfReadable() else { throw AppModelError.learnedDataUnreadable }
+                var userModel: UserModel?
+                if includeTypingData {
+                    // Never export an empty model in place of learned data that merely cannot be read now.
+                    guard let readable = store.loadUserModelIfReadable() else { throw AppModelError.learnedDataUnreadable }
+                    userModel = readable
+                }
                 let payload = BackupPayload(createdAt: Date(), appVersion: version, settings: settings,
                                             profile: profile, userModel: userModel)
                 return try BackupFile.encode(payload, password: password, cipher: PasswordBackupCipher())
@@ -243,6 +248,15 @@ final class AppModel: ObservableObject {
         saveNow()
         let currentSettings = settings
         let currentProfile = profile
+        guard payload.userModel != nil else {
+            // No typing data in the file: the learned data is not touched at all.
+            let applied = BackupFile.apply(payload, mode: mode, to: (settings: currentSettings, profile: currentProfile, model: UserModel()))
+            settings = applied.0
+            profile = applied.1
+            saveNow()
+            completion(true)
+            return
+        }
         let store = self.store
         pendingUserModelChanges += 1
         performInBackground { [weak self] in

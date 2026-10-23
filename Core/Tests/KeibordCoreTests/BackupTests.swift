@@ -228,10 +228,48 @@ final class BackupTests: XCTestCase {
         let payload = try BackupFile.decode(Data(text.utf8), password: nil, cipher: nil)
         XCTAssertEqual(payload.createdAt, Date(timeIntervalSince1970: 0))
         XCTAssertEqual(payload.appVersion, "")
-        XCTAssertFalse(payload.settings.autocorrect)
-        XCTAssertEqual(payload.settings.haptics, KeibordSettings().haptics)
+        XCTAssertEqual(payload.settings?.autocorrect, false)
+        XCTAssertEqual(payload.settings?.haptics, KeibordSettings().haptics)
         XCTAssertNil(payload.profile)
-        XCTAssertEqual(payload.userModel.words, ["Paradeiser": LearnedWord(count: 3, lastUsedDay: 1)])
+        XCTAssertEqual(payload.userModel?.words, ["Paradeiser": LearnedWord(count: 3, lastUsedDay: 1)])
+    }
+
+    // MARK: Choosing what to export
+
+    func testSettingsOnlyAndTypingDataOnlyBackups() throws {
+        var settings = KeibordSettings()
+        settings.autocorrect = false
+        settings.appearance.themeMode = .light
+        let settingsOnly = BackupPayload(createdAt: Date(timeIntervalSince1970: 1_760_000_000), appVersion: "1.0.9",
+                                         settings: settings, profile: nil, userModel: nil)
+        let data = try BackupFile.encode(settingsOnly, password: nil, cipher: nil)
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertFalse(text.contains("userModel"), "no typing data in a settings-only file")
+        let decoded = try BackupFile.decode(data, password: nil, cipher: nil)
+        XCTAssertEqual(decoded, settingsOnly)
+        XCTAssertNil(decoded.userModel)
+
+        var learned = UserModel()
+        learned.addWord("Paradeiser")
+        let current = (settings: KeibordSettings(), profile: PersonalProfile(shortcuts: [TextShortcut(shortcut: "omw", phrase: "On my way")]), model: learned)
+        for mode in ImportMode.allCases {
+            let applied = BackupFile.apply(decoded, mode: mode, to: current)
+            XCTAssertEqual(applied.0, settings, "\(mode): the settings come from the file")
+            XCTAssertEqual(applied.1, current.profile, "\(mode): details stay")
+            XCTAssertEqual(applied.2, learned, "\(mode): what this iPhone learned stays untouched")
+        }
+
+        var imported = UserModel()
+        imported.addWord("Fisolen")
+        let typingOnly = BackupPayload(createdAt: Date(), appVersion: "1.0.9", settings: nil, profile: nil, userModel: imported)
+        let decodedTyping = try BackupFile.decode(try BackupFile.encode(typingOnly, password: nil, cipher: nil), password: nil, cipher: nil)
+        XCTAssertNil(decodedTyping.settings)
+        var mine = KeibordSettings()
+        mine.haptics = .strong
+        let merged = BackupFile.apply(decodedTyping, mode: .merge, to: (settings: mine, profile: PersonalProfile(), model: learned))
+        XCTAssertEqual(merged.0, mine, "the settings on this iPhone stay")
+        XCTAssertNotNil(merged.2.words["Fisolen"])
+        XCTAssertNotNil(merged.2.words["Paradeiser"])
     }
 
     // MARK: Applying an import
@@ -249,14 +287,14 @@ final class BackupTests: XCTestCase {
         XCTAssertEqual(kept, current.profile)
         // A hand-edited or damaged model is cleaned up like a merged one: blocked words stay unlearned.
         var inconsistent = samplePayload()
-        inconsistent.userModel.words["Oida"] = LearnedWord(count: 5, lastUsedDay: 3)
-        inconsistent.userModel.words["unused"] = LearnedWord(count: 0, lastUsedDay: 3)
-        inconsistent.userModel.bigrams[UserModel.bigramKey("oida", "geh")] = 2
-        inconsistent.userModel.bigrams[UserModel.bigramKey("never", "seen")] = 0
+        inconsistent.userModel?.words["Oida"] = LearnedWord(count: 5, lastUsedDay: 3)
+        inconsistent.userModel?.words["unused"] = LearnedWord(count: 0, lastUsedDay: 3)
+        inconsistent.userModel?.bigrams[UserModel.bigramKey("oida", "geh")] = 2
+        inconsistent.userModel?.bigrams[UserModel.bigramKey("never", "seen")] = 0
         XCTAssertEqual(BackupFile.apply(inconsistent, mode: .replace, to: current).2, payload.userModel)
         // The imported model is pruned to the usual limits.
         var huge = samplePayload()
-        for i in 0..<30_050 { huge.userModel.words["w\(i)x"] = LearnedWord(count: 1, lastUsedDay: i) }
+        for i in 0..<30_050 { huge.userModel?.words["w\(i)x"] = LearnedWord(count: 1, lastUsedDay: i) }
         XCTAssertEqual(BackupFile.apply(huge, mode: .replace, to: current).2.words.count, 30_000)
     }
 
@@ -305,7 +343,7 @@ final class BackupTests: XCTestCase {
         XCTAssertNil(model.words["oida"], "blocked in the backup")
         XCTAssertEqual(model.words["Paradeiser"]?.addedManually, true)
         XCTAssertEqual(model.blocked, ["fuck", "oida"])
-        XCTAssertEqual(model.bigrams, payload.userModel.bigrams)
+        XCTAssertEqual(model.bigrams, payload.userModel?.bigrams)
 
         // Without a profile in the backup the current one stays untouched.
         XCTAssertEqual(BackupFile.apply(samplePayload(profile: false), mode: .merge, to: current).1, currentProfile)

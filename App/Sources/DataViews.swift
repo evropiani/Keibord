@@ -411,6 +411,8 @@ struct BackupDocument: FileDocument {
 
 struct DataView: View {
     @EnvironmentObject var model: AppModel
+    @State private var includeTypingData = true
+    @State private var includeSettings = true
     @State private var includePersonal = true
     @State private var exportPassword = ""
     @State private var exportPasswordRepeat = ""
@@ -432,28 +434,46 @@ struct DataView: View {
     /// A mistyped password would make the backup impossible to open, so it is asked for twice.
     private var passwordsMatch: Bool { exportPassword.isEmpty || exportPassword == exportPasswordRepeat }
 
-    private static func filename(for date: Date) -> String {
+    private var exportsSomething: Bool { includeTypingData || includeSettings || includePersonal }
+
+    private func filename(for date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd"
-        return "Keibord-Backup-\(f.string(from: date))"
+        let kind = includeSettings && !includeTypingData && !includePersonal ? "Settings" : "Backup"
+        return "Keibord-\(kind)-\(f.string(from: date))"
+    }
+
+    /// "settings, typing data and details" – what a backup file contains.
+    private static func contents(of payload: BackupPayload) -> String {
+        var parts: [String] = []
+        if payload.settings != nil { parts.append("settings") }
+        if let model = payload.userModel { parts.append("typing data (\(model.words.count) words)") }
+        if payload.profile != nil { parts.append("details & text replacements") }
+        switch parts.count {
+        case 0: return "nothing"
+        case 1: return parts[0]
+        default: return parts.dropLast().joined(separator: ", ") + " and " + parts[parts.count - 1]
+        }
     }
 
     var body: some View {
         Form {
             Section {
-                Toggle("Include My Details & Text Replacements", isOn: $includePersonal)
+                Toggle("Typing Data", isOn: $includeTypingData)
+                Toggle("All Settings", isOn: $includeSettings)
+                Toggle("My Details & Text Replacements", isOn: $includePersonal)
                 SecureField("Password (optional)", text: $exportPassword)
                 if !exportPassword.isEmpty {
                     SecureField("Repeat Password", text: $exportPasswordRepeat)
                 }
-                Button("Export Typing Data…") { export() }
-                    .disabled(busy || !passwordsMatch)
+                Button(includeSettings && !includeTypingData && !includePersonal ? "Export Settings…" : "Export…") { export() }
+                    .disabled(busy || !passwordsMatch || !exportsSomething)
             } header: {
                 Text("Export")
             } footer: {
-                Text((passwordsMatch ? "" : "The passwords do not match. ") + "Exports learned words, word pairs, your touch model, emoji history and all settings as a JSON file. With a password it is encrypted (AES-256) and cannot be opened without it. Cards are never exported.")
+                Text((passwordsMatch ? "" : "The passwords do not match. ") + "Typing data: learned words, word pairs, your touch model and emoji history. All settings: languages, layouts, appearance, colours, tinted keys and every option. Choose any combination; an import only changes what the file contains. With a password the file is encrypted (AES-256) and cannot be opened without it. Cards are never exported.")
             }
             Section {
                 Button("Import Backup…") { showImporter = true }
@@ -525,11 +545,18 @@ struct DataView: View {
             Text("This backup is encrypted. Enter the password that was used to export it.")
         }
         .confirmationDialog("Import Backup", isPresented: $askMode, titleVisibility: .visible) {
-            Button("Merge with This iPhone") { applyImport(.merge) }
-            Button("Replace Everything", role: .destructive) { applyImport(.replace) }
+            if pendingPayload?.userModel == nil {
+                Button("Import") { applyImport(.merge) }
+            } else {
+                Button("Merge with This iPhone") { applyImport(.merge) }
+                Button("Replace Typing Data", role: .destructive) { applyImport(.replace) }
+            }
             Button("Cancel", role: .cancel) { pendingPayload = nil }
         } message: {
-            Text("Both use the settings from the backup. Merge keeps what this iPhone has learned and adds the backup; Replace deletes it.")
+            if let payload = pendingPayload {
+                Text("This file contains \(DataView.contents(of: payload)). Only these are changed on this iPhone."
+                     + (payload.userModel == nil ? "" : " Merge keeps what this iPhone has learned and adds the backup; Replace deletes it."))
+            }
         }
         .confirmationDialog("Delete everything Keibord has learned?", isPresented: $confirmReset, titleVisibility: .visible) {
             Button("Delete Learned Data", role: .destructive) { model.deleteLearnedData() }
@@ -554,11 +581,12 @@ struct DataView: View {
     /// megabytes of learned data would freeze the screen).
     private func export() {
         busy = true
-        model.makeBackup(includePersonal: includePersonal, password: exportPassword.isEmpty ? nil : exportPassword) { result in
+        model.makeBackup(includeTypingData: includeTypingData, includeSettings: includeSettings, includePersonal: includePersonal,
+                         password: exportPassword.isEmpty ? nil : exportPassword) { result in
             busy = false
             switch result {
             case .success(let data):
-                exportFilename = DataView.filename(for: Date())
+                exportFilename = filename(for: Date())
                 exportDocument = BackupDocument(data: data)
                 showExporter = true
             case .failure(let error):
@@ -599,7 +627,7 @@ struct DataView: View {
         model.applyBackup(payload, mode: mode) { ok in
             busy = false
             if ok {
-                message = "Imported \(payload.userModel.words.count) words from \(payload.createdAt.formatted(date: .abbreviated, time: .omitted))."
+                message = "Imported \(DataView.contents(of: payload)) from \(payload.createdAt.formatted(date: .abbreviated, time: .omitted))."
             } else {
                 message = "The backup could not be imported because the learned words could not be saved. Nothing was changed."
             }

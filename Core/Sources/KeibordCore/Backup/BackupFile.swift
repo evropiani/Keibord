@@ -138,26 +138,29 @@ public enum BackupFile {
         return head.dropFirst().drop(while: isSpace).starts(with: Array("\"box\"".utf8))
     }
 
-    /// Combines an imported payload with the current data.
-    /// * `.replace`: settings and learned data come from the backup; the profile too unless the backup
-    ///   was exported without it.
+    /// Combines an imported payload with the current data. Parts the backup does not contain stay as
+    /// they are (a settings-only export never touches the learned data, and the other way round).
+    /// * `.replace`: settings, details and learned data come from the backup.
     /// * `.merge`: imported settings replace the current ones; details already on this device are kept
     ///   and only empty fields are filled; shortcuts are added unless their shortcut exists already;
     ///   learned data is summed (`UserModel.merged(with:)`).
-    /// The resulting model is pruned to the usual limits.
+    /// Imported learned data is pruned to the usual limits.
     public static func apply(_ payload: BackupPayload, mode: ImportMode, to current: (settings: KeibordSettings, profile: PersonalProfile, model: UserModel)) -> (KeibordSettings, PersonalProfile, UserModel) {
+        let settings = payload.settings ?? current.settings
         switch mode {
         case .replace:
+            guard let imported = payload.userModel else { return (settings, payload.profile ?? current.profile, current.model) }
             // Merged into an empty model so the imported data is cleaned up the same way: no learned
             // words or word pairs of blocked words, no unused entries.
-            var model = UserModel().merged(with: payload.userModel)
+            var model = UserModel().merged(with: imported)
             model.prune()
-            return (payload.settings, payload.profile ?? current.profile, model)
+            return (settings, payload.profile ?? current.profile, model)
         case .merge:
             let profile = payload.profile.map { current.profile.merged(with: $0) } ?? current.profile
-            var model = current.model.merged(with: payload.userModel)
+            guard let imported = payload.userModel else { return (settings, profile, current.model) }
+            var model = current.model.merged(with: imported)
             model.prune()
-            return (payload.settings, profile, model)
+            return (settings, profile, model)
         }
     }
 }

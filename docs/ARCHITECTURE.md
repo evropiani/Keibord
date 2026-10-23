@@ -396,6 +396,8 @@ Behaviour (each rule needs a unit test with an in-memory `TextDocumentProxyLike`
   `static func decode(_ data: Data, password: String?, cipher: BackupCipher?) throws -> BackupPayload`,
   `static func isEncrypted(_ data: Data) -> Bool`,
   `static func apply(_ payload: BackupPayload, mode: ImportMode, to current: (settings: KeibordSettings, profile: PersonalProfile, model: UserModel)) -> (KeibordSettings, PersonalProfile, UserModel)`.
+  `BackupPayload.settings`, `.profile` and `.userModel` are optional: an export holds the parts the user
+  chose, and `apply` keeps every part the file does not contain.
   Envelope JSON: `{"format":"keibord-backup","version":1,"encrypted":false,"payload":{…}}` or
   `{"format":"keibord-backup","version":1,"encrypted":true,"kdf":{"name":"PBKDF2-SHA256","iterations":N,"salt":"<b64>"},"cipher":"AES-GCM-256","box":"<b64 combined>"}`.
 * `public final class EmojiCatalog` — `init(baseURL: URL) throws` reading `emoji.json` and lazily
@@ -545,9 +547,10 @@ SwiftUI, `NavigationStack` + `List`. Tabs: **Keyboard** (home), **Settings**, **
   add card (nickname, holder, number with Luhn check & brand detection, expiry, "Require CVV to
   unlock" with CVV entry used only to derive the key), delete, reset failed attempts. Explain that
   passwords/one-time codes are handled by iOS.
-* **Data**: export (`.fileExporter`, JSON document `Keibord-Backup-YYYY-MM-DD.json`, options: include
-  personal info, password-protect), import (`.fileImporter`, password prompt if encrypted, merge or
-  replace), reset learned data, reset everything. Diagnostics section.
+* **Data**: export (`.fileExporter`, JSON document `Keibord-Backup-YYYY-MM-DD.json`, or
+  `Keibord-Settings-…` for settings only; switches: typing data, all settings, personal info; optional
+  password), import (`.fileImporter`, password prompt if encrypted; the dialog names the file's parts and
+  only those change; merge or replace for typing data), reset learned data, reset everything. Diagnostics.
 * App UI language: English.
 
 ## 12. Work packages & ownership
