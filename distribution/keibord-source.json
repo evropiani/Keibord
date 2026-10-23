@@ -1,0 +1,39 @@
+{
+  "name": "Keibord",
+  "identifier": "com.keibord.source",
+  "subtitle": "Private, on-device keyboard",
+  "description": "Keibord is a private keyboard that works fully on your iPhone: German (Austria) and Albanian QWERTZ, English UK/US and Italian, multilingual autocorrect, learning, smart touch zones, emoji search, tinted keys and local AutoFill. Nothing is sent anywhere.",
+  "iconURL": "https://raw.githubusercontent.com/evropiani/Keibord/main/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+  "website": "https://github.com/evropiani/Keibord",
+  "tintColor": "#007AFF",
+  "featuredApps": ["com.keibord.app"],
+  "apps": [
+    {
+      "name": "Keibord",
+      "bundleIdentifier": "com.keibord.app",
+      "developerName": "Senad",
+      "subtitle": "Private, on-device keyboard",
+      "localizedDescription": "A private keyboard that works fully on your iPhone.\n\n• German (Austria) and Albanian on QWERTZ, English UK/US and Italian – all at once, with multilingual autocorrect, accent restoration and predictions\n• Learns your words and where you tap; smart touch zones enlarge the letters you are likely to type next\n• Export and import all typing data (optionally encrypted) to move devices\n• iOS look with themes, custom colours and permanently tinted keys\n• Emoji 17 with search in four languages and skin tones\n• Local AutoFill for your details and encrypted cards (the CVV is never stored)\n\nAfter installing: Settings → General → Keyboard → Keyboards → Add New Keyboard → Keibord, then allow Full Access so your settings and learning reach the keyboard. Your signer must keep the app group for the app and the keyboard.",
+      "iconURL": "https://raw.githubusercontent.com/evropiani/Keibord/main/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+      "tintColor": "#007AFF",
+      "category": "utilities",
+      "screenshots": [],
+      "versions": [
+        {
+          "version": "1.0.6",
+          "buildVersion": "7",
+          "date": "2026-10-23T09:44:57Z",
+          "localizedDescription": "Smart touch zones: like Apple's keyboard, Keibord enlarges the invisible tap area of the letters you are likely to type next. Taps between keys and around suggestions now count.",
+          "downloadURL": "https://github.com/evropiani/Keibord/releases/download/v1.0.6/Keibord.ipa",
+          "size": 17931665,
+          "minOSVersion": "17.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": ["com.apple.security.application-groups"],
+        "privacy": {}
+      }
+    }
+  ],
+  "news": []
+}
