@@ -174,6 +174,6 @@ final class PredictiveTouchEvalTests: XCTestCase {
               + "; raw letters off " + String(format: "%.1f%%", 100 * Double(off.rightLetters) / Double(off.letters))
               + " on " + String(format: "%.1f%%", 100 * Double(on.rightLetters) / Double(on.letters)))
         XCTAssertGreaterThan(on.rightLetters * off.letters, off.rightLetters * on.letters, "predictive zones hit more intended letters")
-        XCTAssertGreaterThanOrEqual(on.right, off.right, "and never cost words after autocorrect")
+        XCTAssertGreaterThanOrEqual(on.right, off.right, "and cost no words after autocorrect")
     }
 }

@@ -248,12 +248,14 @@ public struct TouchResolver {
         public var core: Double
         /// A predicted letter can take over a tap at most this far from its own (offset-adjusted) centre.
         public var reach: Double
-        /// Weight of the prediction (log2 P) against the spatial evidence (bits).
+        /// Weight of the prediction (log2 P) against the spatial evidence (bits). Tuned with
+        /// `PredictiveTouchEvalTests` (scattered taps over real sentences, four languages): 0.3 gained the
+        /// most words after autocorrect; 0.6 hit more raw letters but made real-word errors ("sot" → "sit").
         public var weight: Double
         /// Letters the prediction does not list (no known word continues with them) count as this likely.
         public var floor: Double
 
-        public init(core: Double = 0.3, reach: Double = 0.9, weight: Double = 0.6, floor: Double = -10) {
+        public init(core: Double = 0.3, reach: Double = 0.9, weight: Double = 0.3, floor: Double = -10) {
             self.core = core
             self.reach = reach
             self.weight = weight
