@@ -57,8 +57,27 @@ def upload(text):
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
                  "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28"})
     with urllib.request.urlopen(request) as response:
-        url = json.load(response).get("html_url", gist_id)
-    print(f"Gist updated: {url}")
+        gist = json.load(response)
+    print(f"Gist updated: {gist.get('html_url', gist_id)}")
+    # What the gist holds now, and what its raw link serves (stores read the raw link).
+    for name, f in sorted(gist.get("files", {}).items()):
+        print(f"  file {name}: version {source_version(f.get('content'))}")
+    owner = (gist.get("owner") or {}).get("login", "")
+    raw = f"https://gist.githubusercontent.com/{owner}/{gist_id}/raw/{GIST_FILE_NAME}"
+    try:
+        with urllib.request.urlopen(raw) as response:
+            served = response.read().decode("utf-8")
+            cache = response.headers.get("Cache-Control", "")
+        print(f"  raw link {raw}: version {source_version(served)} (Cache-Control: {cache})")
+    except Exception as error:  # informational only
+        print(f"  raw link {raw}: not readable ({error})")
+
+
+def source_version(text):
+    try:
+        return json.loads(text or "")["apps"][0]["versions"][0]["version"]
+    except Exception:
+        return "?"
 
 
 def main(argv):
