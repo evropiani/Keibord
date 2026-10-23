@@ -40,6 +40,19 @@ def update(source, version, build, size, date, notes):
     if notes:
         entry["localizedDescription"] = notes
     app["versions"] = [entry]
+    mirror_legacy_fields(app)
+
+
+def mirror_legacy_fields(app):
+    """Older AltStore/SideStore versions read the latest version from fields on the app itself."""
+    if not app.get("versions"):
+        return
+    latest = app["versions"][0]
+    app["version"] = latest.get("version")
+    app["versionDate"] = latest.get("date")
+    app["versionDescription"] = latest.get("localizedDescription", "")
+    app["downloadURL"] = latest.get("downloadURL")
+    app["size"] = latest.get("size")
 
 
 def upload(text):
@@ -97,6 +110,8 @@ def main(argv):
             parser.error("--version needs --" + ", --".join(missing))
         notes = release_summary(args.notes_file) if args.notes_file else None
         update(source, args.version, args.build, args.size, args.date, notes)
+    for app in source.get("apps", []):
+        mirror_legacy_fields(app)
     text = json.dumps(source, ensure_ascii=False, indent=2) + "\n"
     with open(SOURCE, "w", encoding="utf-8") as f:
         f.write(text)

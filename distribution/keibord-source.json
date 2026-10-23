@@ -36,7 +36,12 @@
           "com.apple.security.application-groups"
         ],
         "privacy": {}
-      }
+      },
+      "version": "1.0.7",
+      "versionDate": "2026-10-23T11:36:15Z",
+      "versionDescription": "Light and dark mode fixed: automatic follows your iPhone again, and light keys never sit on a black background.",
+      "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
+      "size": 17931014
     }
   ],
   "news": []
