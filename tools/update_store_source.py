@@ -64,6 +64,7 @@ def upload(text):
     if not token or not gist_id:
         print("Gist not updated: GIST_TOKEN or the gist id is missing.")
         return
+    text = keep_newer_release(text, gist_id, token)
     body = json.dumps({"files": {GIST_FILE_NAME: {"content": text}}}).encode("utf-8")
     request = urllib.request.Request(
         f"https://api.github.com/gists/{gist_id}", data=body, method="PATCH",
@@ -84,6 +85,32 @@ def upload(text):
         print(f"  raw link {raw}: version {source_version(served)} (Cache-Control: {cache})")
     except Exception as error:  # informational only
         print(f"  raw link {raw}: not readable ({error})")
+
+
+def version_key(version):
+    try:
+        return tuple(int(part) for part in str(version).split("."))
+    except ValueError:
+        return ()
+
+
+def keep_newer_release(text, gist_id, token):
+    """Releases write their version into the gist only (not the repository): an upload of an older
+    committed file keeps the gist's newer version, so the store never offers a downgrade."""
+    try:
+        request = urllib.request.Request(f"https://api.github.com/gists/{gist_id}",
+                                         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(request) as response:
+            current = json.loads(json.load(response)["files"][GIST_FILE_NAME]["content"])
+        local = json.loads(text)
+        if version_key(source_version(json.dumps(current))) <= version_key(source_version(text)):
+            return text
+        local["apps"][0]["versions"] = current["apps"][0]["versions"]
+        mirror_legacy_fields(local["apps"][0])
+        print(f"  kept the gist's newer version {source_version(json.dumps(current))}")
+        return json.dumps(local, ensure_ascii=False, indent=2) + "\n"
+    except Exception:  # no readable gist file yet: upload as is
+        return text
 
 
 def source_version(text):
