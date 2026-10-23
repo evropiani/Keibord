@@ -549,7 +549,8 @@ SwiftUI, `NavigationStack` + `List`. Tabs: **Keyboard** (home), **Settings**, **
   passwords/one-time codes are handled by iOS.
 * **Data**: export (`.fileExporter`, JSON document `Keibord-Backup-YYYY-MM-DD.json`, or
   `Keibord-Settings-…` for settings only; switches: typing data, all settings, personal info; optional
-  password), import (`.fileImporter`, password prompt if encrypted; the dialog names the file's parts and
+  password), import (UIKit `UIDocumentPickerViewController` as a copy – SwiftUI's `.fileImporter` can ignore
+  taps on a real iPhone; any file can be picked, the content decides; password prompt if encrypted; the dialog names the file's parts and
   only those change; merge or replace for typing data), reset learned data, reset everything. Diagnostics.
 * App UI language: English.
 

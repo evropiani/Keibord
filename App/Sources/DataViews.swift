@@ -419,7 +419,6 @@ struct DataView: View {
     @State private var exportDocument: BackupDocument?
     @State private var exportFilename = ""
     @State private var showExporter = false
-    @State private var showImporter = false
     @State private var importData: Data?
     @State private var importPassword = ""
     @State private var askPassword = false
@@ -484,7 +483,7 @@ struct DataView: View {
                 Text("Typing data: learned words, word pairs, your touch model and emoji history. All settings: languages, layouts, appearance, colours, tinted keys and every option.")
             }
             Section {
-                Button("Import…") { showImporter = true }
+                Button("Import…") { pickImportFile() }
                     .disabled(busy)
             } header: {
                 Text("Import")
@@ -521,29 +520,6 @@ struct DataView: View {
                 if (error as? CocoaError)?.code != .userCancelled { message = error.localizedDescription }
             }
             exportDocument = nil
-        }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                do {
-                    let data = try Data(contentsOf: url)
-                    importData = data
-                    if BackupFile.isEncrypted(data) {
-                        importPassword = ""
-                        passwordWasWrong = false
-                        askPassword = true
-                    } else {
-                        decodeImport(password: nil)
-                    }
-                } catch {
-                    message = error.localizedDescription
-                }
-            case .failure(let error):
-                message = error.localizedDescription
-            }
         }
         .alert(passwordWasWrong ? "Wrong Password" : "Backup Password", isPresented: $askPassword) {
             SecureField("Password", text: $importPassword)
@@ -597,6 +573,27 @@ struct DataView: View {
                 showExporter = true
             case .failure(let error):
                 message = "Export failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func pickImportFile() {
+        DocumentPicker.shared.pickFile { url in
+            guard let url = url else { return }
+            // The picker hands over a copy of the file; it is not needed after reading.
+            defer { try? FileManager.default.removeItem(at: url) }
+            do {
+                let data = try Data(contentsOf: url)
+                importData = data
+                if BackupFile.isEncrypted(data) {
+                    importPassword = ""
+                    passwordWasWrong = false
+                    askPassword = true
+                } else {
+                    decodeImport(password: nil)
+                }
+            } catch {
+                message = "The file could not be read: \(error.localizedDescription)"
             }
         }
     }
