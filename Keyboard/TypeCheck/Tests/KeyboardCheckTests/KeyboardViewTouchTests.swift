@@ -136,12 +136,25 @@ final class KeyboardViewTouchTests: XCTestCase {
         XCTAssertEqual(recorder.actions, ["char:s"])
     }
 
-    func testCancelledTouchTypesNothing() {
+    func testQuickTapCancelledByTheSystemStillTypes() {
         setUpKeyboard(request())
         let t = touch(at: point("a"))
         down(t)
         keyboard.touchesCancelled([t], with: UIEvent())
-        XCTAssertEqual(recorder.actions, [])
+        XCTAssertEqual(recorder.actions, ["char:a"], "iOS cancels taps near the screen edges; they are key presses")
+    }
+
+    func testCancelledSwipeOrLongTouchTypesNothing() {
+        setUpKeyboard(request())
+        let swipe = touch(at: point("a"))
+        down(swipe)
+        move(swipe, to: point("a", dx: 25))
+        keyboard.touchesCancelled([swipe], with: UIEvent())
+        let held = touch(at: point("l"))
+        down(held)
+        wait(0.35)
+        keyboard.touchesCancelled([held], with: UIEvent())
+        XCTAssertEqual(recorder.actions, [], "a swipe or a held finger was not a tap")
     }
 
     // MARK: Return, shift, globe

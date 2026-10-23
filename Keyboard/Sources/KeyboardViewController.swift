@@ -31,6 +31,8 @@ final class KeyboardViewController: UIInputViewController {
     private var appeared = false
     /// Height requests repeated in this appearance because the system kept another height.
     private var heightRetries = 0
+    /// The container the system touch delays were last relaxed for.
+    private weak var touchDelaysDisabledFor: UIView?
     private static let maxHeightRetries = 3
 
     private enum Mode: Equatable { case keys, emoji, emojiSearch, cardUnlock(UUID) }
@@ -200,9 +202,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // The keyboard window's system edge gestures delay touchesBegan for keys at the screen edges
-        // (q, a, p, shift, backspace…), which made those keys lag and break rollover order.
-        view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+        disableSystemTouchDelays()
         // A keyboard can only change its height once it has been drawn on screen; a request made
         // before is not always applied (iOS 27 kept the default height, which cut off the bottom row).
         // Ask again now (and again if the system still keeps another height). Should the height still
@@ -240,6 +240,22 @@ final class KeyboardViewController: UIInputViewController {
         super.viewDidLayoutSubviews()
         layoutChildren()
         requestHeightAgainIfIgnored()
+        // The system may move the keyboard into other container views after it appeared.
+        if appeared, view.window != nil, touchDelaysDisabledFor !== view.superview { disableSystemTouchDelays() }
+    }
+
+    /// System gesture recognizers (screen-edge gestures) delay touchesBegan for keys at the screen edges
+    /// (q, a, y, p, ü, ä, shift, backspace…): those taps lagged, came out of order or were lost when
+    /// typing fast. They sit on the keyboard's window and, in newer iOS versions, on the container views
+    /// around the keyboard, so every one of them is relaxed.
+    private func disableSystemTouchDelays() {
+        var ancestor = view.superview
+        while let v = ancestor {
+            v.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+            ancestor = v.superview
+        }
+        view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+        touchDelaysDisabledFor = view.superview
     }
 
     override func viewSafeAreaInsetsDidChange() {

@@ -126,6 +126,10 @@ private enum KeyTiming {
     static let backspaceWordModeDelay: TimeInterval = 1.6
     /// Space-bar trackpad: points of horizontal drag per character.
     static let trackpadStep: CGFloat = 9
+    /// A touch iOS cancels (it suspected a system edge gesture) still types its key when it was this short
+    /// and stayed this close to where it began: a tap, not a swipe.
+    static let cancelledTapMaxDuration: TimeInterval = 0.3
+    static let cancelledTapMaxTravel: CGFloat = 12
 }
 
 /// The key area: draws keys and turns touches into `KeyboardViewEvent`s.
@@ -179,6 +183,10 @@ final class KeyboardView: UIView {
         var trackpadOriginX: CGFloat = 0
         var cursorSteps = 0
         var repeatTicks = 0
+        /// When and where the finger went down, and how far it moved since (cancelled taps).
+        let beganAt = ProcessInfo.processInfo.systemUptime
+        var startPoint: CGPoint = .zero
+        var travel: CGFloat = 0
         init(frameIndex: Int, key: KeySpec, tap: TapInput?, order: Int) {
             self.frameIndex = frameIndex
             self.key = key
@@ -431,6 +439,7 @@ final class KeyboardView: UIView {
             touchCounter += 1
             let t = Tracked(frameIndex: hit.frameIndex, key: key, tap: hit.tap, order: touchCounter)
             t.lastX = point.x
+            t.startPoint = point
             tracked[ObjectIdentifier(touch)] = t
             delegate?.keyboardView(self, didTrigger: .keyDown(key))
             begin(t, key: key, event: event)
@@ -544,6 +553,7 @@ final class KeyboardView: UIView {
                 callout.select(at: convert(point, to: callout))
             case .normal:
                 t.lastX = point.x
+                t.travel = max(t.travel, hypot(point.x - t.startPoint.x, point.y - t.startPoint.y))
                 if t.key.action == .globe {
                     if let event = event { delegate?.keyboardView(self, globeTouchedWith: event, in: self) }
                     continue
@@ -588,6 +598,14 @@ final class KeyboardView: UIView {
             guard let t = tracked.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
             t.timer?.invalidate()
             t.timer = nil
+            // iOS cancels touches when it suspects a system gesture (keys at the screen edges, fast typing
+            // with both thumbs): a short tap that stayed in place was a key press and still types.
+            if t.mode == .normal, Self.commitsOnRollover(t.key),
+               ProcessInfo.processInfo.systemUptime - t.beganAt <= KeyTiming.cancelledTapMaxDuration,
+               t.travel <= KeyTiming.cancelledTapMaxTravel {
+                commit(t)
+                continue
+            }
             if t.key.action == .globe, let event = event {
                 // The system must see the end of a globe touch too, or its keyboard list stays open.
                 delegate?.keyboardView(self, globeTouchedWith: event, in: self)
