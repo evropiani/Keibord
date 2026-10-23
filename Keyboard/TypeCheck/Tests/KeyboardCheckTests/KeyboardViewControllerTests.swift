@@ -92,6 +92,17 @@ final class KeyboardViewControllerTests: XCTestCase {
 
     // MARK: Typing
 
+    /// iOS gives a keyboard extension no touches where it drew nothing: with clear backgrounds the gaps
+    /// between keys and the suggestion bar around its words did not react.
+    func testEveryTouchSurfaceIsDrawnSoTouchesBetweenKeysArrive() {
+        start()
+        XCTAssertTrue(vc.view.backgroundColor === UIColor.touchableClear)
+        XCTAssertTrue(keyboard.backgroundColor === UIColor.touchableClear)
+        XCTAssertTrue(subview(SuggestionBarView.self)?.backgroundColor === UIColor.touchableClear)
+        send(.emoji)
+        XCTAssertTrue(subview(EmojiPanelView.self)?.backgroundColor === UIColor.touchableClear)
+    }
+
     func testHeightIsRequestedAgainOnceTheKeyboardIsOnScreen() {
         start()
         let requested = height

@@ -207,7 +207,7 @@ final class KeyboardView: UIView {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
         clipsToBounds = false
-        backgroundColor = .clear
+        backgroundColor = .touchableClear // touches in the gaps between keys reach the nearest key
         popup.isHidden = true
         callout.isHidden = true
     }

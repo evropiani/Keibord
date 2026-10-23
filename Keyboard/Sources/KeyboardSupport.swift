@@ -1,6 +1,14 @@
 import UIKit
 import KeibordCore
 
+extension UIColor {
+    /// Background for every part of the keyboard that must take touches. iOS hit-tests a keyboard
+    /// extension by what it drew: fully transparent pixels get no touches, so with a clear background the
+    /// gaps between keys and the suggestion bar around its words were dead (only the key itself, or only
+    /// the word, reacted). 1 % black is invisible on the keyboard backdrop but counts as drawn.
+    static let touchableClear = UIColor(white: 0, alpha: 0.01)
+}
+
 /// Resolved visual appearance used by all keyboard views.
 ///
 /// The `UIColor`s keys need are resolved once per theme (the controller caches the theme), not per
@@ -54,7 +62,12 @@ struct KeyboardTheme {
         labelUIColor = c.label.uiColor
         keyShadowColor = c.keyShadow.uiColor
         secondaryLabel = labelUIColor.withAlphaComponent(0.55)
-        backgroundColor = c.background?.uiColor ?? .clear
+        // Never fully transparent: a clear keyboard takes no touches (see `UIColor.touchableClear`).
+        if let background = c.background, background.alpha >= 0.01 {
+            backgroundColor = background.uiColor
+        } else {
+            backgroundColor = .touchableClear
+        }
     }
 
     func keyColor(_ key: KeySpec, prominentReturn: Bool) -> UIColor {
