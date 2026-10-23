@@ -11,7 +11,7 @@
     {
       "name": "Keibord",
       "bundleIdentifier": "com.keibord.app",
-      "developerName": "Senad",
+      "developerName": "evropiani",
       "subtitle": "Private, on-device keyboard",
       "localizedDescription": "A private keyboard that works fully on your iPhone.\n\n• German (Austria) and Albanian on QWERTZ, English UK/US and Italian – all at once, with multilingual autocorrect, accent restoration and predictions\n• Learns your words and where you tap; smart touch zones enlarge the letters you are likely to type next\n• Export and import all typing data (optionally encrypted) to move devices\n• iOS look with themes, custom colours and permanently tinted keys\n• Emoji 17 with search in four languages and skin tones\n• Local AutoFill for your details and encrypted cards (the CVV is never stored)\n\nAfter installing: Settings → General → Keyboard → Keyboards → Add New Keyboard → Keibord, then allow Full Access so your settings and learning reach the keyboard. Your signer must keep the app group for the app and the keyboard.",
       "iconURL": "https://raw.githubusercontent.com/evropiani/Keibord/main/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
