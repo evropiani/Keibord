@@ -22,10 +22,10 @@
         {
           "version": "1.0.7",
           "buildVersion": "8",
-          "date": "2026-10-23T12:00:00Z",
+          "date": "2026-10-23T11:36:15Z",
           "localizedDescription": "Light and dark mode fixed: automatic follows your iPhone again, and light keys never sit on a black background.",
           "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
-          "size": 17931665,
+          "size": 17931014,
           "minOSVersion": "17.0"
         }
       ],
