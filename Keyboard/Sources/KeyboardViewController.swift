@@ -37,6 +37,8 @@ final class KeyboardViewController: UIInputViewController {
     private var preparedForAppearance = false
     /// The view size last written to the keyboard log.
     private var loggedSize: CGSize?
+    /// The visible part of a view taller than its window, as last written to the keyboard log.
+    private var loggedClipping: CGSize?
     /// The container the system touch delays were last relaxed for.
     private weak var touchDelaysDisabledFor: UIView?
     /// When the keyboard checks, after appearing, that its keys are drawn and its height was applied.
@@ -709,18 +711,33 @@ final class KeyboardViewController: UIInputViewController {
         layoutChildren()
     }
 
+    /// The part of the keyboard's view inside its window. Should iOS keep the window lower than the
+    /// view (the required height constraint won inside the keyboard, but the window did not grow), the
+    /// keys stay in the visible part instead of the bottom row being cut off.
+    private var visibleBounds: CGRect {
+        guard let window = view.window else { return view.bounds }
+        let visible = view.convert(window.bounds, from: window).intersection(view.bounds)
+        guard !visible.isNull, visible.height >= 1, visible.height < view.bounds.height - 1 else { return view.bounds }
+        if loggedClipping != visible.size {
+            loggedClipping = visible.size
+            KeyboardLog.shared.add("view \(Self.sizeText(view.bounds.size)) but only \(Self.sizeText(visible.size)) inside the window: keys kept inside")
+        }
+        return visible
+    }
+
     private func layoutChildren() {
         // In landscape on Face ID iPhones the keys stay clear of the rounded corners and the sensor
         // housing, like the system keyboard (the margins show the keyboard background).
         let insets = view.safeAreaInsets
-        let b = CGRect(x: insets.left, y: 0, width: max(0, view.bounds.width - insets.left - insets.right), height: view.bounds.height)
+        let visible = visibleBounds
+        let b = CGRect(x: insets.left, y: visible.minY, width: max(0, view.bounds.width - insets.left - insets.right), height: visible.height)
         switch mode {
         case .keys:
-            suggestionBar.frame = CGRect(x: b.minX, y: 0, width: b.width, height: Self.barHeight)
-            keyboardView.frame = CGRect(x: b.minX, y: Self.barHeight, width: b.width, height: max(0, b.height - Self.barHeight))
+            suggestionBar.frame = CGRect(x: b.minX, y: b.minY, width: b.width, height: Self.barHeight)
+            keyboardView.frame = CGRect(x: b.minX, y: b.minY + Self.barHeight, width: b.width, height: max(0, b.height - Self.barHeight))
         case .emojiSearch:
-            if emojiSearchBarAdded { emojiSearchBar.frame = CGRect(x: b.minX, y: 0, width: b.width, height: Self.searchBarHeight) }
-            keyboardView.frame = CGRect(x: b.minX, y: Self.searchBarHeight, width: b.width, height: max(0, b.height - Self.searchBarHeight))
+            if emojiSearchBarAdded { emojiSearchBar.frame = CGRect(x: b.minX, y: b.minY, width: b.width, height: Self.searchBarHeight) }
+            keyboardView.frame = CGRect(x: b.minX, y: b.minY + Self.searchBarHeight, width: b.width, height: max(0, b.height - Self.searchBarHeight))
         case .emoji:
             if emojiPanelAdded { emojiPanel.frame = b }
         case .cardUnlock:
