@@ -473,16 +473,18 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   Nothing is read from `textDocumentProxy` (and `needsInputModeSwitchKey`) before iOS connects the
   field (`proxyConnected`: viewWillAppear or textDidChange): reading `documentIdentifier` while
   loading crashed the keyboard (1.0.14). The field is configured in viewWillAppear.
-  Height: keys and height are set in viewDidLoad (iOS takes the height it finds while the keyboard
-  loads), on one `view.heightAnchor` constraint (priority 999) that is only ever changed, never
-  replaced, plus `preferredContentSize`; no `allowsSelfSizing` (1.0.3–1.0.13 set it, and iOS kept its
-  default 241 pt in every app). When iOS still keeps another height (some apps, e.g. after switching
-  from another keyboard), the request is changed for real once, 0.5 s after appearing (+1 pt, then
-  back): Apple applies height changes made once the keyboard is on screen. Self-checks 0.5 s/1.5 s
-  after appearing render again when no keys are drawn and log the height iOS kept; 1 s after loading,
-  a keyboard never announced as shown is logged and prepared if it is in a window. The number row
-  follows the setting only. In a lower key area the row gaps give way first (down to 4 pt), then the
-  keys (`KeyboardMetrics.fitted`).
+  Height (as Apple's guide and azooKey, an open-source keyboard with custom heights on iOS 26, do
+  it): one *required* `view.heightAnchor` constraint (priority 999, used until 1.0.16, always gave way
+  to iOS's own 241 pt), first activated in viewDidAppear and afterwards only changed; after every
+  change `view` and its system superview are laid out at once (`performWithoutAnimation`), which is
+  when iOS takes the height. `view.translatesAutoresizingMaskIntoConstraints = true`; no
+  `allowsSelfSizing`, no `preferredContentSize`. When iOS lays the keyboard out at another height
+  afterwards (size change in viewDidLayoutSubviews, or the self-check 0.5 s after appearing), the
+  height is requested again, at most 6 times per appearance. Keys are drawn in viewDidLoad; the
+  self-checks 0.5 s/1.5 s after appearing render again when no keys are drawn and log the height iOS
+  kept; 1 s after loading, a keyboard never announced as shown is logged and prepared if it is in a
+  window. The number row follows the setting only. In a lower key area the row gaps give way first
+  (down to 4 pt), then the keys (`KeyboardMetrics.fitted`).
   `KeyboardLog` (`keyboard-log.txt` in the shared folder, appended, trimmed at 64 KB) records
   opening/closing, sizes, memory footprint, height retries and main-thread stalls
   (`MainThreadWatchdog`, while visible) – never typed text. The app shows it in Data → Keyboard Log.
