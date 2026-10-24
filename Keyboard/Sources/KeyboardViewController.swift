@@ -31,9 +31,15 @@ final class KeyboardViewController: UIInputViewController {
     private var appeared = false
     /// Height requests repeated in this appearance because the system kept another height.
     private var heightRetries = 0
+    /// viewWillAppear ran for the current appearance (it was not always called: the keyboard then
+    /// appeared without keys).
+    private var preparedForAppearance = false
+    /// The view size last written to the keyboard log.
+    private var loggedSize: CGSize?
     /// The container the system touch delays were last relaxed for.
     private weak var touchDelaysDisabledFor: UIView?
-    private static let maxHeightRetries = 3
+    /// Delays of the height requests repeated while the system keeps another height (or none at all).
+    private static let heightRetryDelays: [TimeInterval] = [0.1, 0.25, 0.5, 1, 2]
 
     private enum Mode: Equatable { case keys, emoji, emojiSearch, cardUnlock(UUID) }
     private var mode: Mode = .keys
@@ -103,6 +109,9 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        let loadStart = Date()
+        MainThreadWatchdog.shared.start(for: self)
+        KeyboardLog.shared.add("open \(KeibordVersion.display): loading (memory \(KeyboardDiagnostics.memoryDescription))")
         settings = store.loadSettings()
         settingsDate = store.modificationDate(of: .settings)
         profile = store.loadProfile()
@@ -139,6 +148,13 @@ final class KeyboardViewController: UIInputViewController {
         inputView?.allowsSelfSizing = true
 
         installHeightConstraint()
+        KeyboardLog.shared.add(String(format: "loaded in %.0f ms", Date().timeIntervalSince(loadStart) * 1000)
+                               + (inputView == nil ? " (no input view)" : ""))
+    }
+
+    deinit {
+        MainThreadWatchdog.shared.stop(for: self)
+        KeyboardLog.shared.add("controller released")
     }
 
     /// Asks the system for `requestedHeight` with new height constraints (on the keyboard's view and on
@@ -161,18 +177,53 @@ final class KeyboardViewController: UIInputViewController {
     /// The system laid the keyboard out at another height than requested (it applies requests only
     /// after the keyboard is on screen, and not reliably in every app): ask again a few times, a moment
     /// later, so the keyboard ends up with the same height in every app.
+    /// A keyboard the system left at no height at all (only 🌐 and the microphone below it) is asked
+    /// again too.
     private func requestHeightAgainIfIgnored() {
-        guard appeared, view.bounds.height > 0, abs(view.bounds.height - requestedHeight) > 1,
-              heightRetries < Self.maxHeightRetries else { return }
+        guard appeared, abs(view.bounds.height - requestedHeight) > 1, heightRetries < Self.heightRetryDelays.count else { return }
+        let delay = Self.heightRetryDelays[heightRetries]
         heightRetries += 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1 * Double(heightRetries)) { [weak self] in
+        let attempt = heightRetries
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self, self.appeared, abs(self.view.bounds.height - self.requestedHeight) > 1 else { return }
+            KeyboardLog.shared.add("height \(Int(self.view.bounds.height)) instead of \(Int(self.requestedHeight)): asking again (\(attempt))")
+            self.inputView?.allowsSelfSizing = true
             self.installHeightConstraint()
         }
     }
 
+    /// Checks shortly after appearing that keys are drawn and the height was applied (both went wrong
+    /// now and then: the keyboard stayed blank or collapsed until it was opened again).
+    private func checkAfterAppearing() {
+        for delay in [0.3, 1.2] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self, self.appeared else { return }
+                self.ensureKeysAreShown()
+                self.requestHeightAgainIfIgnored()
+            }
+        }
+    }
+
+    private func ensureKeysAreShown() {
+        guard controller != nil, mode == .keys || mode == .emojiSearch else { return }
+        guard renderedGlobeKey == nil || !keyboardView.hasKeys || keyboardView.isHidden else { return }
+        KeyboardLog.shared.add("no keys on screen (view \(Self.sizeText(view.bounds.size)), keys \(Self.sizeText(keyboardView.bounds.size))): drawing again")
+        render()
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+    }
+
+    private static func sizeText(_ size: CGSize) -> String { "\(Int(size.width))×\(Int(size.height))" }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        prepareForAppearance()
+    }
+
+    private func prepareForAppearance() {
+        preparedForAppearance = true
+        MainThreadWatchdog.shared.start(for: self)
+        inputView?.allowsSelfSizing = true
         fullAccess = hasFullAccess
         heightRetries = 0
         // Before reloading: a settings change renders right away (controller delegate), which must not
@@ -203,10 +254,16 @@ final class KeyboardViewController: UIInputViewController {
         writeState()
         render()
         scheduleEngineRefresh()
+        KeyboardLog.shared.add("appear: \(controller.field.kind) field, full access \(fullAccess ? "on" : "off"), view \(Self.sizeText(view.bounds.size)), "
+                               + "height wanted \(Int(requestedHeight)), memory \(KeyboardDiagnostics.memoryDescription)")
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if !preparedForAppearance {
+            KeyboardLog.shared.add("appeared without viewWillAppear: preparing now")
+            prepareForAppearance()
+        }
         disableSystemTouchDelays()
         // A keyboard can only change its height once it has been drawn on screen; a request made
         // before is not always applied (iOS 27 kept the default height, which cut off the bottom row).
@@ -214,11 +271,16 @@ final class KeyboardViewController: UIInputViewController {
         // fall short, the rows shrink to fit (KeyboardView).
         appeared = true
         installHeightConstraint()
+        KeyboardLog.shared.add("on screen: view \(Self.sizeText(view.bounds.size)), window \(Self.sizeText(view.window?.bounds.size ?? .zero))")
+        checkAfterAppearing()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         appeared = false
+        preparedForAppearance = false
+        MainThreadWatchdog.shared.stop(for: self)
+        KeyboardLog.shared.add("close")
         // A held backspace must not keep deleting once the keyboard goes away.
         keyboardView.cancelAllTouches()
         if emojiPanelAdded { emojiPanel.stopBackspaceRepeat() }
@@ -233,6 +295,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
+        KeyboardLog.shared.add("memory warning (memory \(KeyboardDiagnostics.memoryDescription))")
         layoutCache.removeAll()
         if mode != .emoji, mode != .emojiSearch { releaseEmojiSearchData(force: true) }
     }
@@ -246,6 +309,10 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        if view.bounds.size != loggedSize {
+            loggedSize = view.bounds.size
+            KeyboardLog.shared.add("size \(Self.sizeText(view.bounds.size)) (wanted height \(Int(requestedHeight)))")
+        }
         layoutChildren()
         requestHeightAgainIfIgnored()
         // The system may move the keyboard into other container views after it appeared.

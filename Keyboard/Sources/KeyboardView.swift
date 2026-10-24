@@ -244,6 +244,9 @@ final class KeyboardView: UIView {
         refreshAppearance()
     }
 
+    /// Key views exist (they are built in the first layout pass with a width).
+    var hasKeys: Bool { !keyViews.isEmpty }
+
     private func rebuildKeys() {
         keyViews.values.forEach { $0.removeFromSuperview() }
         keyViews = [:]

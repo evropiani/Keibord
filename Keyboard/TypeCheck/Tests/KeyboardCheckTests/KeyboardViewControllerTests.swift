@@ -360,6 +360,60 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(KeibordStore.shared.loadUserModel().words["oida"]?.count, 1, "the learning still reaches the disk")
     }
 
+    // MARK: Blank or collapsed keyboard
+
+    func testKeysAreShownWhenTheSystemSkipsViewWillAppear() {
+        proxy = TestProxy()
+        vc = KeyboardViewController()
+        vc.testProxy = proxy
+        vc.testTraitCollection = UITraitCollection(testStyle: .light)
+        vc.viewDidLoad()
+        vc.viewDidAppear(false) // no viewWillAppear: nothing was rendered before
+        XCTAssertNotNil(keyView("a"), "the keyboard opened blank")
+        vc.viewWillDisappear(false)
+    }
+
+    func testACollapsedKeyboardAsksForItsHeightAgain() {
+        start()
+        vc.viewDidAppear(false)
+        let wanted = height
+        let before = vc.view.heightAnchor.testConstraints.count
+        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 0) // only 🌐 and the microphone are left
+        vc.viewDidLayoutSubviews()
+        wait(0.2)
+        XCTAssertGreaterThan(vc.view.heightAnchor.testConstraints.count, before, "asked again")
+        XCTAssertEqual(vc.view.heightAnchor.testConstraints.last?.constant, wanted)
+        XCTAssertEqual(vc.view.heightAnchor.testConstraints.last?.isActive, true)
+        vc.viewWillDisappear(false)
+    }
+
+    func testTheKeyboardLogRecordsOpeningAndClosingButNoTypedText() {
+        KeyboardLog.shared.clear()
+        start()
+        vc.viewDidAppear(false)
+        type("geheimwort ")
+        vc.viewWillDisappear(false)
+        KeyboardLog.shared.flush()
+        let log = KeyboardLog.shared.read()
+        for event in ["loading", "appear: text field", "on screen", "close"] {
+            XCTAssertTrue(log.contains(event), "\(event) missing in\n\(log)")
+        }
+        XCTAssertFalse(log.contains("geheim"))
+    }
+
+    func testAStalledMainThreadIsLogged() {
+        KeyboardLog.shared.clear()
+        start() // the watchdog runs while the keyboard is open
+        Thread.sleep(forTimeInterval: 2.2) // the main thread does not answer
+        wait(1.2)
+        vc.viewWillDisappear(false)
+        wait(0.1)
+        KeyboardLog.shared.flush()
+        let log = KeyboardLog.shared.read()
+        XCTAssertTrue(log.contains("main thread not responding"), log)
+        XCTAssertTrue(log.contains("main thread responding again"), log)
+    }
+
     func testModelChangedByTheAppIsReloadedOnTheNextAppearance() {
         start()
         wait(0.3)

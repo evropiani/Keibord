@@ -409,6 +409,41 @@ struct BackupDocument: FileDocument {
     }
 }
 
+/// What the keyboard wrote to its log (opening, sizes, stalls; never typed text), to copy and send
+/// when the keyboard misbehaves.
+struct KeyboardLogView: View {
+    @State private var log = ""
+    @State private var copied = false
+
+    var body: some View {
+        ScrollView {
+            Text(log.isEmpty ? "Nothing logged yet. Open the keyboard (with Full Access on), then come back." : log)
+                .font(.caption2.monospaced())
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+        }
+        .navigationTitle("Keyboard Log")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button(copied ? "Copied" : "Copy") {
+                    UIPasteboard.general.string = log
+                    copied = true
+                }
+                .disabled(log.isEmpty)
+                Button("Clear", role: .destructive) {
+                    KeyboardLog.shared.clear()
+                    log = ""
+                }
+                .disabled(log.isEmpty)
+            }
+        }
+        .onAppear { log = KeyboardLog.shared.read() }
+        .refreshable { log = KeyboardLog.shared.read() }
+    }
+}
+
 struct DataView: View {
     @EnvironmentObject var model: AppModel
     @State private var includeTypingData = true
@@ -504,6 +539,7 @@ struct DataView: View {
                 LabeledContent("Keyboard Full Access", value: model.state.hasFullAccess ? "Yes" : "No")
                 LabeledContent("Keyboard app group", value: model.state.appGroupIdentifier ?? "unknown")
                 Text(AppGroup.diagnostics).font(.caption.monospaced()).foregroundStyle(.secondary)
+                NavigationLink("Keyboard Log") { KeyboardLogView() }
             }
         }
         .navigationTitle("Data")

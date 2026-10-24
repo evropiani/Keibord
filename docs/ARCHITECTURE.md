@@ -470,6 +470,11 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   field can change). `viewWillDisappear` → flush learning delta in the background
   (`performExpiringActivity` keeps the extension running until the write is done; the main thread
   never waits for a file). Flush also every 25 committed words.
+  Self-checks after appearing (0.3 s and 1.2 s): keys drawn (render again if not; also when
+  `viewWillAppear` was skipped) and height applied (re-requested with backoff, also from height 0).
+  `KeyboardLog` (`keyboard-log.txt` in the shared folder, appended, trimmed at 64 KB) records
+  opening/closing, sizes, memory footprint, height retries and main-thread stalls
+  (`MainThreadWatchdog`, while visible) – never typed text. The app shows it in Data → Keyboard Log.
   Request `requestSupplementaryLexicon` once and pass entries to the engine. Observe the Darwin
   notification to reload settings.
 * **Field mapping** (`FieldContextMapper`): `UITextDocumentProxy.textContentType` → `FieldKind`

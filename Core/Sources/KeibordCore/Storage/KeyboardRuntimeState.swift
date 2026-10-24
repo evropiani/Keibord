@@ -38,6 +38,8 @@ public enum KeibordFile: String, CaseIterable, Sendable {
     case state = "state.json"
     case cards = "cards.json"
     case deviceKey = "device.key"
+    /// What the keyboard did (opening, sizes, stalls): `KeyboardLog`, shown in the app.
+    case keyboardLog = "keyboard-log.txt"
 }
 
 /// Shared JSON encoder/decoder configuration so every process writes identical files.
