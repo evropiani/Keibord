@@ -7,12 +7,6 @@ import KeibordCore
 /// file. Files that both processes change (`user-model.json`, `cards.json`) are only changed through
 /// coordinated read-modify-write cycles (`update`, `updateUserModel`, `flush`), so neither process can
 /// overwrite what the other one just wrote.
-///
-/// Plain reads are not coordinated: every write replaces the file atomically, so a reader always sees a
-/// whole file, and a coordinated read waits for any other process that holds the file. A process iOS
-/// suspended in the middle of a coordinated write (the app in the background, another keyboard
-/// instance) made such a read wait for a long time; on the keyboard's main thread the keyboard then
-/// stayed blank.
 final class KeibordStore {
     static let shared = KeibordStore()
 
@@ -52,9 +46,18 @@ final class KeibordStore {
 
     // MARK: Generic coordinated IO
 
-    /// Never waits for the other process (see above).
     func readData(_ file: KeibordFile) -> Data? {
-        try? Data(contentsOf: url(file))
+        var result: Data?
+        var error: NSError?
+        var coordinated = false
+        NSFileCoordinator().coordinate(readingItemAt: url(file), options: [], error: &error) { u in
+            coordinated = true
+            result = try? Data(contentsOf: u)
+        }
+        // The coordinator can be unavailable (it never ran the reader): the files are replaced
+        // atomically, so a plain read still never sees half a file.
+        if !coordinated { result = try? Data(contentsOf: url(file)) }
+        return result
     }
 
     func exists(_ file: KeibordFile) -> Bool { FileManager.default.fileExists(atPath: url(file).path) }
@@ -177,15 +180,20 @@ final class KeibordStore {
     }
 
     /// Like `loadUserModel`, but nil when the file exists and cannot be read right now (data protection,
-    /// I/O error), where an empty model would be mistaken for the real one (e.g. an
+    /// I/O error, coordination failure), where an empty model would be mistaken for the real one (e.g. an
     /// export that silently contains no learned words). A missing file is an empty model; an undecodable
     /// one too (its bytes are kept aside by the next write).
     func loadUserModelIfReadable() -> UserModel? {
-        switch Self.load(UserModel.self, at: url(.userModel)) {
-        case .missing, .corrupt: return UserModel()
-        case .loaded(let model): return model
-        case .unreadable: return nil
+        var result: UserModel?
+        var error: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: url(.userModel), options: [], error: &error) { u in
+            switch Self.load(UserModel.self, at: u) {
+            case .missing, .corrupt: result = UserModel()
+            case .loaded(let model): result = model
+            case .unreadable: result = nil
+            }
         }
+        return result
     }
 
     /// Replaces the learned data (reset / import replace). Learning edits go through `updateUserModel`.

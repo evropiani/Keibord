@@ -7,18 +7,7 @@ import KeibordCore
 final class TestProxy: UITextDocumentProxy {
     var text = ""
     var cursor = 0
-    /// False until iOS connects the text field: the real proxy then has no document, and reading
-    /// `documentIdentifier` (a non-optional UUID in Swift) crashes the keyboard.
-    var connected = true
-    private(set) var identifierReadWhileDisconnected = false
-    private var identifier = UUID()
-    var documentIdentifier: UUID {
-        get {
-            if !connected { identifierReadWhileDisconnected = true }
-            return identifier
-        }
-        set { identifier = newValue }
-    }
+    var documentIdentifier = UUID()
     var keyboardType: UIKeyboardType? = .default
     var keyboardAppearance: UIKeyboardAppearance? = .default
     var returnKeyType: UIReturnKeyType? = .default
@@ -147,32 +136,17 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertTrue(vc.view.backgroundColor === UIColor.touchableClear, "dark theme on the dark backdrop: the system's glass")
     }
 
-    /// iOS takes the height it finds while the keyboard loads (it kept a 241 pt placeholder whatever
-    /// was asked later): the right height is set then, on one constraint that is only ever changed.
-    func testTheHeightIsSetWhileLoadingOnOneConstraint() {
-        var settings = KeibordSettings()
-        settings.appearance.showNumberRow = true
-        KeibordStore.shared.saveSettings(settings)
-        proxy = TestProxy()
-        vc = KeyboardViewController()
-        vc.testProxy = proxy
-        vc.testTraitCollection = UITraitCollection(testStyle: .light)
-        vc.viewDidLoad()
-        let full = 36 + KeyboardMetrics.standard(height: .standard, landscape: false).keyboardHeight(rows: 5)
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, 1)
-        XCTAssertEqual(height, full, "the full height before the keyboard appears")
-        XCTAssertEqual(vc.preferredContentSize.height, full)
-        XCTAssertNotNil(keyView("a"), "keys before the keyboard appears")
-        vc.viewWillAppear(false)
+    func testHeightIsRequestedAgainOnceTheKeyboardIsOnScreen() {
+        start()
+        let requested = height
+        XCTAssertGreaterThan(requested, 0)
+        let first = vc.view.heightAnchor.testConstraints.last
         vc.viewDidAppear(false)
-        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 0)
-        vc.viewDidLayoutSubviews()
-        wait(0.6)
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, 1, "never replaced")
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.first?.isActive, true)
-        send(.switchPage(.numbers))
-        XCTAssertEqual(height, full)
-        vc.viewWillDisappear(false)
+        let again = vc.view.heightAnchor.testConstraints.last
+        XCTAssertFalse(first === again, "a new constraint asks the system again")
+        XCTAssertEqual(first?.isActive, false)
+        XCTAssertEqual(again?.isActive, true)
+        XCTAssertEqual(again?.constant, requested)
     }
 
     func testKeysStayInsideTheSafeAreaInLandscape() {
@@ -310,51 +284,6 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(height, letters)
     }
 
-    /// iOS keeps some keyboards at 241 pt. The number row stays as set (it used to come and go from
-    /// app to app), and the row gaps give way before the keys get lower.
-    func testALowKeyboardKeepsTheNumberRowAndTheKeyHeight() {
-        var settings = KeibordSettings()
-        settings.appearance.showNumberRow = true
-        start(settings: settings)
-        let full = height
-        vc.view.frame = CGRect(x: 0, y: 0, width: 440, height: 241)
-        vc.viewDidLayoutSubviews()
-        XCTAssertEqual(keyboard.layout?.rows.count, 5, "the number row stays")
-        XCTAssertEqual(height, full, "the full height is still requested")
-        XCTAssertGreaterThan(keyView("a")?.frame.height ?? 0, 34, "five rows in 205 pt: only the gaps are minimal")
-        settings.appearance.showNumberRow = false
-        KeibordStore.shared.saveSettings(settings)
-        markChangedByTheApp(.settings)
-        vc.viewWillDisappear(false)
-        vc.viewWillAppear(false)
-        vc.viewDidLayoutSubviews()
-        XCTAssertEqual(keyboard.layout?.rows.count, 4)
-        XCTAssertEqual(keyView("a")?.frame.height, KeyboardMetrics.standard(height: .standard, landscape: false).keyHeight,
-                       "four rows in 241 pt keep the full key height")
-    }
-
-    /// iOS applies height changes made once the keyboard is on screen: when it kept 241 pt, the request
-    /// is changed once for real (a point more, then back), on the same constraint.
-    func testAnIgnoredHeightIsChangedOnceAfterAppearing() {
-        KeyboardLog.shared.clear()
-        start()
-        vc.viewDidAppear(false)
-        let wanted = height
-        vc.view.frame = CGRect(x: 0, y: 0, width: 440, height: 241)
-        vc.viewDidLayoutSubviews()
-        wait(0.6)
-        XCTAssertEqual(height, wanted + 1, "changed for real")
-        wait(0.3)
-        XCTAssertEqual(height, wanted, "and back")
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, 1)
-        wait(1.0)
-        KeyboardLog.shared.flush()
-        let log = KeyboardLog.shared.read()
-        XCTAssertEqual(log.components(separatedBy: "changing the request once").count - 1, 1, "only once per appearance")
-        XCTAssertTrue(log.contains("iOS keeps height 241"))
-        vc.viewWillDisappear(false)
-    }
-
     func testLanguageKeySwitchesLayoutAndSpaceLabel() {
         start()
         XCTAssertEqual(keyView("space")?.label.text, "Deutsch (Österreich)")
@@ -405,124 +334,9 @@ final class KeyboardViewControllerTests: XCTestCase {
         wait(0.3)
         type("servus oida ")
         vc.viewWillDisappear(false)
-        vc.waitForPendingWrites()
         let saved = KeibordStore.shared.loadUserModel()
         XCTAssertEqual(saved.words["oida"]?.count, 1)
         XCTAssertEqual(saved.bigrams[UserModel.bigramKey("Servus", "oida")] ?? saved.bigrams[UserModel.bigramKey("servus", "oida")], 1)
-    }
-
-    /// A file held by another process (suspended by iOS in the middle of a write) made the keyboard wait
-    /// on its main thread: it opened blank. Opening and closing never wait for the files now.
-    func testOpeningAndClosingNeverWaitForAFileHeldElsewhere() {
-        start()
-        wait(0.3)
-        type("servus oida ")
-        NSFileCoordinator.testWriteHold = 1.5
-        defer { NSFileCoordinator.testWriteHold = 0 }
-        let closing = Date()
-        vc.viewWillDisappear(false) // its learning write now holds the files for 1.5 s
-        XCTAssertLessThan(Date().timeIntervalSince(closing), 0.5, "closing waited for the write")
-        let first = vc!
-        let opening = Date()
-        start() // the keyboard opens again (a new controller) while the write still holds the files
-        XCTAssertLessThan(Date().timeIntervalSince(opening), 0.5, "opening waited for the held file")
-        XCTAssertNotNil(keyView("a"), "the keys are shown")
-        first.waitForPendingWrites()
-        XCTAssertEqual(KeibordStore.shared.loadUserModel().words["oida"]?.count, 1, "the learning still reaches the disk")
-    }
-
-    // MARK: Blank or collapsed keyboard
-
-    func testAClosedKeyboardControllerIsReleased() {
-        weak var released: KeyboardViewController?
-        start()
-        vc.viewDidAppear(false)
-        type("servus ")
-        send(.emoji)
-        send(.switchPage(.letters))
-        vc.viewWillDisappear(false)
-        vc.waitForPendingWrites()
-        released = vc
-        vc = nil
-        proxy = nil
-        wait(2) // scheduled checks and refreshes run out
-        XCTAssertNil(released, "the keyboard controller leaked")
-    }
-
-    func testKeysAreShownWhenTheSystemSkipsViewWillAppear() {
-        proxy = TestProxy()
-        vc = KeyboardViewController()
-        vc.testProxy = proxy
-        vc.testTraitCollection = UITraitCollection(testStyle: .light)
-        vc.viewDidLoad()
-        vc.viewDidAppear(false) // no viewWillAppear: nothing was rendered before
-        XCTAssertNotNil(keyView("a"), "the keyboard opened blank")
-        vc.viewWillDisappear(false)
-    }
-
-    /// 1.0.14 read the document identifier while loading: the keyboard crashed before it was shown,
-    /// every time. Learned words that finished loading before viewWillAppear did the same now and then.
-    func testNothingReadsTheDocumentBeforeIOSConnectsIt() {
-        var model = UserModel()
-        model.words["leiwand"] = LearnedWord(count: 5, lastUsedDay: 20_000, language: "de-AT")
-        KeibordStore.shared.saveUserModel(model)
-        proxy = TestProxy()
-        proxy.connected = false
-        vc = KeyboardViewController()
-        vc.testProxy = proxy
-        vc.testTraitCollection = UITraitCollection(testStyle: .light)
-        vc.viewDidLoad()
-        wait(0.4) // the learned words load and refresh the suggestions
-        vc.viewWillLayoutSubviews()
-        vc.viewDidLayoutSubviews()
-        XCTAssertFalse(proxy.identifierReadWhileDisconnected, "the keyboard would crash while loading")
-        XCTAssertNotNil(keyView("a"), "keys while loading")
-        proxy.connected = true
-        vc.viewWillAppear(false)
-        vc.viewDidAppear(false)
-        type("servus ")
-        XCTAssertEqual(proxy.text, "Servus ")
-        vc.viewWillDisappear(false)
-    }
-
-    func testAKeyboardLoadedButNeverAnnouncedIsLoggedAndPrepared() {
-        KeyboardLog.shared.clear()
-        proxy = TestProxy()
-        vc = KeyboardViewController()
-        vc.testProxy = proxy
-        vc.testTraitCollection = UITraitCollection(testStyle: .light)
-        vc.viewDidLoad() // and then no viewWillAppear/viewDidAppear
-        wait(1.2)
-        KeyboardLog.shared.flush()
-        XCTAssertTrue(KeyboardLog.shared.read().contains("not announced as shown"))
-        XCTAssertNotNil(keyView("a"))
-    }
-
-    func testTheKeyboardLogRecordsOpeningAndClosingButNoTypedText() {
-        KeyboardLog.shared.clear()
-        start()
-        vc.viewDidAppear(false)
-        type("geheimwort ")
-        vc.viewWillDisappear(false)
-        KeyboardLog.shared.flush()
-        let log = KeyboardLog.shared.read()
-        for event in ["loading", "height wanted", "appear: text field", "on screen", "close"] {
-            XCTAssertTrue(log.contains(event), "\(event) missing in\n\(log)")
-        }
-        XCTAssertFalse(log.contains("geheim"))
-    }
-
-    func testAStalledMainThreadIsLogged() {
-        KeyboardLog.shared.clear()
-        start() // the watchdog runs while the keyboard is open
-        Thread.sleep(forTimeInterval: 2.2) // the main thread does not answer
-        wait(1.2)
-        vc.viewWillDisappear(false)
-        wait(0.1)
-        KeyboardLog.shared.flush()
-        let log = KeyboardLog.shared.read()
-        XCTAssertTrue(log.contains("main thread not responding"), log)
-        XCTAssertTrue(log.contains("main thread responding again"), log)
     }
 
     func testModelChangedByTheAppIsReloadedOnTheNextAppearance() {
@@ -539,7 +353,6 @@ final class KeyboardViewControllerTests: XCTestCase {
         type("neuw")
         XCTAssertTrue(barTitles.contains { $0.lowercased() == "neuwort" }, "\(barTitles)")
         vc.viewWillDisappear(false)
-        vc.waitForPendingWrites()
         let saved = KeibordStore.shared.loadUserModel()
         XCTAssertNotNil(saved.words["neuwort"])
         XCTAssertNotNil(saved.words["Servus"] ?? saved.words["servus"])
@@ -559,13 +372,11 @@ final class KeyboardViewControllerTests: XCTestCase {
         type("servus oida ")
         blockUserModelFile()
         vc.viewWillDisappear(false) // the write fails: the file cannot be read
-        vc.waitForPendingWrites()
         wait(0.05)
         try? FileManager.default.removeItem(at: KeibordStore.shared.url(.userModel))
         vc.viewWillAppear(false)
         wait(0.3)
         vc.viewWillDisappear(false)
-        vc.waitForPendingWrites()
         let saved = KeibordStore.shared.loadUserModel()
         XCTAssertEqual(saved.words["oida"]?.count, 1, "the failed write's words reach the disk with the next one")
         XCTAssertEqual(saved.languageUsage.values.reduce(0, +), 2, "counted once")
