@@ -470,8 +470,12 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   field can change). `viewWillDisappear` → flush learning delta in the background
   (`performExpiringActivity` keeps the extension running until the write is done; the main thread
   never waits for a file). Flush also every 25 committed words.
-  Self-checks after appearing (0.3 s and 1.2 s): keys drawn (render again if not; also when
-  `viewWillAppear` was skipped) and height applied (re-requested with backoff, also from height 0).
+  Height: requested once the keyboard is on screen (viewDidAppear) and re-requested only by the
+  self-checks 0.5 s and 1.5 s after appearing, never from layout passes (iOS sizes a keyboard in
+  several steps: no height, full screen, final height; requests in between left it collapsed or
+  blank). The self-checks also render again when no keys are drawn (also when `viewWillAppear` was
+  skipped). When the system keeps the keyboard too low for the number row (rows < 85 % of their
+  height, e.g. Spotlight), the number row is hidden; the full height is still requested.
   `KeyboardLog` (`keyboard-log.txt` in the shared folder, appended, trimmed at 64 KB) records
   opening/closing, sizes, memory footprint, height retries and main-thread stalls
   (`MainThreadWatchdog`, while visible) – never typed text. The app shows it in Data → Keyboard Log.

@@ -284,6 +284,23 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(height, letters)
     }
 
+    /// Spotlight keeps keyboards lower than requested: all five rows squeezed in made tiny keys.
+    func testTheNumberRowMakesWayWhenTheSystemKeepsTheKeyboardLow() {
+        var settings = KeibordSettings()
+        settings.appearance.showNumberRow = true
+        start(settings: settings)
+        let full = height
+        XCTAssertEqual(keyboard.layout?.rows.count, 5)
+        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 240)
+        vc.viewDidLayoutSubviews()
+        XCTAssertEqual(keyboard.layout?.rows.count, 4, "number row hidden")
+        XCTAssertEqual(height, full, "the full height is still requested")
+        XCTAssertGreaterThan(keyView("a")?.frame.height ?? 0, 37, "keys keep nearly their size")
+        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: full)
+        vc.viewDidLayoutSubviews()
+        XCTAssertEqual(keyboard.layout?.rows.count, 5, "back once there is room")
+    }
+
     func testLanguageKeySwitchesLayoutAndSpaceLabel() {
         start()
         XCTAssertEqual(keyView("space")?.label.text, "Deutsch (Österreich)")
@@ -380,7 +397,8 @@ final class KeyboardViewControllerTests: XCTestCase {
         let before = vc.view.heightAnchor.testConstraints.count
         vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 0) // only 🌐 and the microphone are left
         vc.viewDidLayoutSubviews()
-        wait(0.2)
+        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, before, "no request while iOS is still sizing the keyboard")
+        wait(0.6)
         XCTAssertGreaterThan(vc.view.heightAnchor.testConstraints.count, before, "asked again")
         XCTAssertEqual(vc.view.heightAnchor.testConstraints.last?.constant, wanted)
         XCTAssertEqual(vc.view.heightAnchor.testConstraints.last?.isActive, true)

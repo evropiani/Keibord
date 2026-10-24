@@ -29,8 +29,11 @@ final class KeyboardViewController: UIInputViewController {
     private var requestedHeight: CGFloat = 260
     /// The keyboard has appeared on screen (height requests made before are not always applied).
     private var appeared = false
-    /// Height requests repeated in this appearance because the system kept another height.
-    private var heightRetries = 0
+    /// Counts appearances, so checks scheduled for an earlier one do nothing.
+    private var appearanceCount = 0
+    /// The system gave the keyboard enough height for the number row (it is hidden when it would
+    /// squeeze every row, e.g. in Spotlight, which keeps keyboards at a fixed lower height).
+    private var numberRowFits = true
     /// viewWillAppear ran for the current appearance (it was not always called: the keyboard then
     /// appeared without keys).
     private var preparedForAppearance = false
@@ -38,8 +41,10 @@ final class KeyboardViewController: UIInputViewController {
     private var loggedSize: CGSize?
     /// The container the system touch delays were last relaxed for.
     private weak var touchDelaysDisabledFor: UIView?
-    /// Delays of the height requests repeated while the system keeps another height (or none at all).
-    private static let heightRetryDelays: [TimeInterval] = [0.1, 0.25, 0.5, 1, 2]
+    /// When the keyboard checks, after appearing, that its keys are drawn and its height was applied.
+    private static let recheckDelays: [TimeInterval] = [0.5, 1.5]
+    /// The number row is hidden when the rows would shrink below this share of their normal height.
+    private static let minimumRowScale: CGFloat = 0.85
 
     private enum Mode: Equatable { case keys, emoji, emojiSearch, cardUnlock(UUID) }
     private var mode: Mode = .keys
@@ -174,34 +179,35 @@ final class KeyboardViewController: UIInputViewController {
         view.setNeedsLayout()
     }
 
-    /// The system laid the keyboard out at another height than requested (it applies requests only
-    /// after the keyboard is on screen, and not reliably in every app): ask again a few times, a moment
-    /// later, so the keyboard ends up with the same height in every app.
-    /// A keyboard the system left at no height at all (only 🌐 and the microphone below it) is asked
-    /// again too.
-    private func requestHeightAgainIfIgnored() {
-        guard appeared, abs(view.bounds.height - requestedHeight) > 1, heightRetries < Self.heightRetryDelays.count else { return }
-        let delay = Self.heightRetryDelays[heightRetries]
-        heightRetries += 1
-        let attempt = heightRetries
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self = self, self.appeared, abs(self.view.bounds.height - self.requestedHeight) > 1 else { return }
-            KeyboardLog.shared.add("height \(Int(self.view.bounds.height)) instead of \(Int(self.requestedHeight)): asking again (\(attempt))")
-            self.inputView?.allowsSelfSizing = true
-            self.installHeightConstraint()
+    /// Checks once the system has finished presenting the keyboard that its keys are drawn and its
+    /// height was applied, and asks again for the height if not. Never on every layout pass: iOS sizes
+    /// a keyboard in several steps (no height, full screen, then the requested height), and requests
+    /// made in between left it collapsed (only 🌐 and the microphone) or blank.
+    private func checkAfterAppearing() {
+        let appearance = appearanceCount
+        for (index, delay) in Self.recheckDelays.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self, self.appeared, self.appearanceCount == appearance else { return }
+                self.ensureKeysAreShown()
+                guard abs(self.view.bounds.height - self.requestedHeight) > 1 else { return }
+                KeyboardLog.shared.add("height \(Int(self.view.bounds.height)) instead of \(Int(self.requestedHeight)): asking again (\(index + 1))")
+                self.inputView?.allowsSelfSizing = true
+                self.installHeightConstraint()
+            }
         }
     }
 
-    /// Checks shortly after appearing that keys are drawn and the height was applied (both went wrong
-    /// now and then: the keyboard stayed blank or collapsed until it was opened again).
-    private func checkAfterAppearing() {
-        for delay in [0.3, 1.2] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self = self, self.appeared else { return }
-                self.ensureKeysAreShown()
-                self.requestHeightAgainIfIgnored()
-            }
-        }
+    /// Hides the number row while the system keeps the keyboard too low for it, so the other rows keep
+    /// (nearly) their normal size instead of all of them shrinking; it comes back once there is room.
+    /// The full height is still requested.
+    private func updateNumberRowFit() {
+        guard controller != nil, settings.appearance.showNumberRow, mode == .keys, view.bounds.height > 0 else { return }
+        let metrics = KeyboardMetrics.standard(height: settings.appearance.keyHeight, landscape: isLandscape)
+        let fits = view.bounds.height - Self.barHeight >= metrics.keyboardHeight(rows: 5) * Self.minimumRowScale
+        guard fits != numberRowFits else { return }
+        numberRowFits = fits
+        KeyboardLog.shared.add(fits ? "room for the number row again" : "height \(Int(view.bounds.height)): number row hidden so the keys keep their size")
+        render()
     }
 
     private func ensureKeysAreShown() {
@@ -225,7 +231,7 @@ final class KeyboardViewController: UIInputViewController {
         MainThreadWatchdog.shared.start(for: self)
         inputView?.allowsSelfSizing = true
         fullAccess = hasFullAccess
-        heightRetries = 0
+        appearanceCount += 1
         // Before reloading: a settings change renders right away (controller delegate), which must not
         // configure the emoji panel (loading the emoji catalog) the keyboard was dismissed in.
         mode = .keys
@@ -313,8 +319,8 @@ final class KeyboardViewController: UIInputViewController {
             loggedSize = view.bounds.size
             KeyboardLog.shared.add("size \(Self.sizeText(view.bounds.size)) (wanted height \(Int(requestedHeight)))")
         }
+        updateNumberRowFit()
         layoutChildren()
-        requestHeightAgainIfIgnored()
         // The system may move the keyboard into other container views after it appeared.
         if appeared, view.window != nil, touchDelaysDisabledFor !== view.superview { disableSystemTouchDelays() }
     }
@@ -632,7 +638,8 @@ final class KeyboardViewController: UIInputViewController {
         let baseMetrics = KeyboardMetrics.standard(height: settings.appearance.keyHeight, landscape: isLandscape)
         let field = controller.field
         let searching = mode == .emojiSearch
-        let numberRow = settings.appearance.showNumberRow && !searching
+        let numberRowWanted = settings.appearance.showNumberRow && !searching
+        let numberRow = numberRowWanted && numberRowFits
         let globeKey = needsInputModeSwitchKey
         renderedGlobeKey = globeKey
         // The emoji panel and the CVV pad take the height of the letter keys they replace.
@@ -650,7 +657,8 @@ final class KeyboardViewController: UIInputViewController {
         let layout = self.layout(for: request)
         let isPad = request.variant == .numberPad || request.variant == .decimalPad
         let rows = max(layout.rows.count, isPad ? 4 : (numberRow ? 5 : 4))
-        let keysHeight = baseMetrics.keyboardHeight(rows: rows)
+        // The full height is requested even while the number row is hidden for lack of room.
+        let keysHeight = baseMetrics.keyboardHeight(rows: max(rows, numberRowWanted && !isPad ? 5 : 4))
         let total = (searching ? Self.searchBarHeight : Self.barHeight) + keysHeight
         requestedHeight = total
         if heightConstraint?.constant != total { heightConstraint?.constant = total }
