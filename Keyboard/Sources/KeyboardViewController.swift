@@ -223,7 +223,10 @@ final class KeyboardViewController: UIInputViewController {
         keyboardView.cancelAllTouches()
         if emojiPanelAdded { emojiPanel.stopBackspaceRepeat() }
         cancelEngineRefresh()
-        flushLearning(synchronously: true)
+        // The main thread never waits for the file here: a write stuck behind another process kept the
+        // keyboard from responding, and it opened blank the next time.
+        flushLearning()
+        finishWritesBeforeSuspension()
         releaseEmojiSearchData()
         purgeExpiredCards()
     }
@@ -400,31 +403,34 @@ final class KeyboardViewController: UIInputViewController {
         pendingEvents += 1
     }
 
-    /// Writes the pending learning delta. Typing flushes run in the background; `synchronously` (keyboard
-    /// disappearing, reload) also waits for writes still running.
-    private func flushLearning(synchronously: Bool = false) {
-        guard !pendingDelta.isEmpty else {
-            if synchronously { flushQueue.sync {} }
-            return
-        }
+    /// Writes the pending learning delta in the background.
+    private func flushLearning() {
+        guard !pendingDelta.isEmpty else { return }
         let delta = pendingDelta
         pendingDelta = UserModelDelta()
         pendingEvents = 0
         let store = self.store
         let generation = userModelLoadGeneration
-        if synchronously {
-            flushQueue.sync {
-                let result = writeLearning(delta, to: store)
-                DispatchQueue.main.async { [weak self] in self?.didFlush(result, delta: delta, loadGeneration: generation) }
-            }
-        } else {
-            flushQueue.async {
-                let result = writeLearning(delta, to: store)
-                DispatchQueue.main.async { [weak self] in self?.didFlush(result, delta: delta, loadGeneration: generation) }
-            }
+        flushQueue.async {
+            let result = writeLearning(delta, to: store)
+            DispatchQueue.main.async { [weak self] in self?.didFlush(result, delta: delta, loadGeneration: generation) }
         }
         engineNeedsUserModel = true
         scheduleEngineRefresh()
+    }
+
+    /// iOS suspends a hidden keyboard soon: ask for the time to finish the queued writes (on a
+    /// background thread, so the keyboard stays responsive).
+    private func finishWritesBeforeSuspension() {
+        let queue = flushQueue
+        ProcessInfo.processInfo.performExpiringActivity(withReason: "Keibord saves what it learned") { expired in
+            if !expired { queue.sync {} }
+        }
+    }
+
+    /// Waits until the queued writes and loads are done (tests).
+    func waitForPendingWrites() {
+        flushQueue.sync {}
     }
 
     private func didFlush(_ result: LearningWrite, delta: UserModelDelta, loadGeneration: Int) {

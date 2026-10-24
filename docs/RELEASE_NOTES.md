@@ -1,6 +1,5 @@
-Keibord 1.0.10: importing a backup works again.
+Keibord 1.0.11: the keyboard no longer opens blank.
 
-- Data → Import: tapping an exported file in the file picker now opens it. Before, on some iPhones the picker stayed open and nothing happened (an iOS bug in the picker SwiftUI provides; Keibord now uses the UIKit picker).
-- Any file can be chosen, even one that lost its ".json" ending when it was sent or saved; Keibord checks the content and tells you if it is not a Keibord backup.
+- Sometimes the keyboard opened empty (only 🌐 and the microphone below it) until it was closed or switched. While opening and closing, the keyboard waited for its files; when iOS had paused the Keibord app (or another copy of the keyboard) in the middle of saving, that wait never ended and no keys were drawn. Opening and closing no longer wait for any file: settings are read directly, and what the keyboard learned is saved in the background.
 
 Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboard), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.

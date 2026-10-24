@@ -3,16 +3,36 @@
 import Foundation
 import KeibordCore
 
+/// One coordinated access at a time, like a file held by another process. `testWriteHold` keeps each
+/// write's claim that long (a process iOS suspended in the middle of a write).
 final class NSFileCoordinator {
+    static var testWriteHold: TimeInterval = 0
+    private static let claim = NSLock()
     init() {}
     struct ReadingOptions: OptionSet { var rawValue: Int }
-    func coordinate(readingItemAt url: URL, options: ReadingOptions = [], error: UnsafeMutablePointer<NSError?>?, byAccessor reader: (URL) -> Void) { reader(url) }
-    func coordinate(writingItemAt url: URL, options: WritingOptions = [], error: UnsafeMutablePointer<NSError?>?, byAccessor writer: (URL) -> Void) { writer(url) }
+    func coordinate(readingItemAt url: URL, options: ReadingOptions = [], error: UnsafeMutablePointer<NSError?>?, byAccessor reader: (URL) -> Void) {
+        Self.claim.lock()
+        defer { Self.claim.unlock() }
+        reader(url)
+    }
+    func coordinate(writingItemAt url: URL, options: WritingOptions = [], error: UnsafeMutablePointer<NSError?>?, byAccessor writer: (URL) -> Void) {
+        Self.claim.lock()
+        defer { Self.claim.unlock() }
+        if Self.testWriteHold > 0 { Thread.sleep(forTimeInterval: Self.testWriteHold) }
+        writer(url)
+    }
     struct WritingOptions: OptionSet {
         var rawValue: Int
         static let forReplacing = WritingOptions(rawValue: 1)
         static let forMerging = WritingOptions(rawValue: 2)
         static let forDeleting = WritingOptions(rawValue: 4)
+    }
+}
+
+extension ProcessInfo {
+    /// Darwin only: runs the block on a background thread, as iOS does for an extension.
+    func performExpiringActivity(withReason reason: String, using block: @escaping (Bool) -> Void) {
+        DispatchQueue.global().async { block(false) }
     }
 }
 

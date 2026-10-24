@@ -334,9 +334,30 @@ final class KeyboardViewControllerTests: XCTestCase {
         wait(0.3)
         type("servus oida ")
         vc.viewWillDisappear(false)
+        vc.waitForPendingWrites()
         let saved = KeibordStore.shared.loadUserModel()
         XCTAssertEqual(saved.words["oida"]?.count, 1)
         XCTAssertEqual(saved.bigrams[UserModel.bigramKey("Servus", "oida")] ?? saved.bigrams[UserModel.bigramKey("servus", "oida")], 1)
+    }
+
+    /// A file held by another process (suspended by iOS in the middle of a write) made the keyboard wait
+    /// on its main thread: it opened blank. Opening and closing never wait for the files now.
+    func testOpeningAndClosingNeverWaitForAFileHeldElsewhere() {
+        start()
+        wait(0.3)
+        type("servus oida ")
+        NSFileCoordinator.testWriteHold = 1.5
+        defer { NSFileCoordinator.testWriteHold = 0 }
+        let closing = Date()
+        vc.viewWillDisappear(false) // its learning write now holds the files for 1.5 s
+        XCTAssertLessThan(Date().timeIntervalSince(closing), 0.5, "closing waited for the write")
+        let first = vc!
+        let opening = Date()
+        start() // the keyboard opens again (a new controller) while the write still holds the files
+        XCTAssertLessThan(Date().timeIntervalSince(opening), 0.5, "opening waited for the held file")
+        XCTAssertNotNil(keyView("a"), "the keys are shown")
+        first.waitForPendingWrites()
+        XCTAssertEqual(KeibordStore.shared.loadUserModel().words["oida"]?.count, 1, "the learning still reaches the disk")
     }
 
     func testModelChangedByTheAppIsReloadedOnTheNextAppearance() {
@@ -353,6 +374,7 @@ final class KeyboardViewControllerTests: XCTestCase {
         type("neuw")
         XCTAssertTrue(barTitles.contains { $0.lowercased() == "neuwort" }, "\(barTitles)")
         vc.viewWillDisappear(false)
+        vc.waitForPendingWrites()
         let saved = KeibordStore.shared.loadUserModel()
         XCTAssertNotNil(saved.words["neuwort"])
         XCTAssertNotNil(saved.words["Servus"] ?? saved.words["servus"])
@@ -372,11 +394,13 @@ final class KeyboardViewControllerTests: XCTestCase {
         type("servus oida ")
         blockUserModelFile()
         vc.viewWillDisappear(false) // the write fails: the file cannot be read
+        vc.waitForPendingWrites()
         wait(0.05)
         try? FileManager.default.removeItem(at: KeibordStore.shared.url(.userModel))
         vc.viewWillAppear(false)
         wait(0.3)
         vc.viewWillDisappear(false)
+        vc.waitForPendingWrites()
         let saved = KeibordStore.shared.loadUserModel()
         XCTAssertEqual(saved.words["oida"]?.count, 1, "the failed write's words reach the disk with the next one")
         XCTAssertEqual(saved.languageUsage.values.reduce(0, +), 2, "counted once")

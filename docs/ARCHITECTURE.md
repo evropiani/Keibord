@@ -427,8 +427,10 @@ Compiled into both targets (no framework). UIKit/CryptoKit/Security/CommonCrypto
    `static var isAvailable: Bool`, `static var resolvedIdentifier: String?`, `static var diagnostics: String`.
    The extension's bundle is `.appex`; use `Bundle.main` in both processes.
 2. **`KeibordStore`** (singleton per process): root = `<group>/Keibord/` or, if unavailable, the
-   process's own Application Support (`isShared = false`). Generic coordinated JSON read/write
-   (`NSFileCoordinator`, atomic writes, `.completeUntilFirstUserAuthentication` protection).
+   process's own Application Support (`isShared = false`). Coordinated JSON writes and read-modify-write
+   cycles (`NSFileCoordinator`, atomic writes, `.completeUntilFirstUserAuthentication` protection);
+   plain reads are not coordinated (atomic replacement already gives whole files, and a coordinated
+   read waits for a process suspended mid-write: the keyboard opened blank).
    API: `loadSettings() -> KeibordSettings`, `saveSettings(_:)`, `loadProfile()`, `saveProfile(_:)`,
    `loadUserModel()`, `saveUserModel(_:)` (app edits), `flush(_ delta: UserModelDelta)` (coordinated
    read → apply → prune → write; used by the keyboard), `updateUserModel(_ transform: (inout UserModel) -> Void)`,
@@ -465,7 +467,9 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   files (modification dates), `configure(field:)` from `textDocumentProxy`, write
   `KeyboardRuntimeState` (hasFullAccess, lastActive, language, version, group id). `textWillChange`
   / `textDidChange` → `controller.documentDidChange()` and re-derive the field context (the focused
-  field can change). `viewWillDisappear` → flush learning delta. Flush also every 25 committed words.
+  field can change). `viewWillDisappear` → flush learning delta in the background
+  (`performExpiringActivity` keeps the extension running until the write is done; the main thread
+  never waits for a file). Flush also every 25 committed words.
   Request `requestSupplementaryLexicon` once and pass entries to the engine. Observe the Darwin
   notification to reload settings.
 * **Field mapping** (`FieldContextMapper`): `UITextDocumentProxy.textContentType` → `FieldKind`
