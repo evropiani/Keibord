@@ -77,12 +77,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release_tag || github.ref_name }}
         run: gh release create "$TAG" Keibord.ipa --target "$GITHUB_SHA" --title "Keibord $TAG" --notes-file docs/RELEASE_NOTES.md
-      - name: Update the store source gist
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
-        env:
-          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
-          TAG: ${{ inputs.release_tag || github.ref_name }}
-        run: |
-          BUILD=$(sed -n 's/^ *CURRENT_PROJECT_VERSION: "\(.*\)"/\1/p' project.yml | head -1)
-          python3 tools/update_store_source.py --version "${TAG#v}" --build "$BUILD" --size "$(stat -f%z Keibord.ipa)" \
-            --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --notes-file docs/RELEASE_NOTES.md --upload

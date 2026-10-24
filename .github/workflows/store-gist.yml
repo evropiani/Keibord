@@ -1,7 +1,7 @@
 name: Update store gist
 
-# Uploads distribution/keibord-source.json (as committed) to the store source gist. Releases do this
-# automatically with the new version; run this by hand after editing the source file.
+# Uploads distribution/keibord-source.json (as committed) to the old store source gist, by hand only.
+# Releases no longer touch the gist: the owner keeps their own store source up to date with a script.
 on:
   workflow_dispatch:
 
