@@ -22,12 +22,12 @@
       "screenshots": [],
       "versions": [
         {
-          "version": "1.0.10",
-          "buildVersion": "11",
-          "date": "2026-10-23T22:48:24Z",
-          "localizedDescription": "Keibord 1.0.10: importing a backup works again.\n\n- Data → Import: tapping an exported file in the file picker now opens it. Before, on some iPhones the picker stayed open and nothing happened (an iOS bug in the picker SwiftUI provides; Keibord now uses the UIKit picker).\n- Any file can be chosen, even one that lost its \".json\" ending when it was sent or saved; Keibord checks the content and tells you if it is not a Keibord backup.",
+          "version": "1.0.11",
+          "buildVersion": "12",
+          "date": "2026-10-24T16:11:26Z",
+          "localizedDescription": "Keibord 1.0.11: the keyboard no longer opens blank.\n\n- Sometimes the keyboard opened empty (only 🌐 and the microphone below it) until it was closed or switched. While opening and closing, the keyboard waited for its files; when iOS had paused the Keibord app (or another copy of the keyboard) in the middle of saving, that wait never ended and no keys were drawn. Opening and closing no longer wait for any file: settings are read directly, and what the keyboard learned is saved in the background.",
           "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
-          "size": 17959144,
+          "size": 17962114,
           "minOSVersion": "17.0"
         }
       ],
@@ -37,11 +37,11 @@
         ],
         "privacy": {}
       },
-      "version": "1.0.10",
-      "versionDate": "2026-10-23T22:48:24Z",
-      "versionDescription": "Keibord 1.0.10: importing a backup works again.\n\n- Data → Import: tapping an exported file in the file picker now opens it. Before, on some iPhones the picker stayed open and nothing happened (an iOS bug in the picker SwiftUI provides; Keibord now uses the UIKit picker).\n- Any file can be chosen, even one that lost its \".json\" ending when it was sent or saved; Keibord checks the content and tells you if it is not a Keibord backup.",
+      "version": "1.0.11",
+      "versionDate": "2026-10-24T16:11:26Z",
+      "versionDescription": "Keibord 1.0.11: the keyboard no longer opens blank.\n\n- Sometimes the keyboard opened empty (only 🌐 and the microphone below it) until it was closed or switched. While opening and closing, the keyboard waited for its files; when iOS had paused the Keibord app (or another copy of the keyboard) in the middle of saving, that wait never ended and no keys were drawn. Opening and closing no longer wait for any file: settings are read directly, and what the keyboard learned is saved in the background.",
       "downloadURL": "https://github.com/evropiani/Keibord/releases/latest/download/Keibord.ipa",
-      "size": 17959144
+      "size": 17962114
     }
   ],
   "news": []
