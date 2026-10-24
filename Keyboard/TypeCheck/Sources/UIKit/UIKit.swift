@@ -500,6 +500,7 @@ open class UIViewController: UIResponder {
     /// Test-only: what the system reports for the keyboard (it also draws the backdrop in this style).
     public var testTraitCollection = UITraitCollection()
     open var traitCollection: UITraitCollection { testTraitCollection }
+    open var preferredContentSize: CGSize = .zero
     open func viewDidLoad() {}
     open func viewWillAppear(_ animated: Bool) {}
     open func viewDidAppear(_ animated: Bool) {}

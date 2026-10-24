@@ -1,7 +1,8 @@
-Keibord 1.0.13: normal-sized keys in Spotlight, fewer collapsed or empty keyboards.
+Keibord 1.0.14: full height and keys from the first moment.
 
-- Spotlight (and any app that keeps keyboards lower than they ask for) squeezed all rows together, so the keys were tiny. When there is not enough room, the number row now makes way and the other keys keep (nearly) their normal size. It comes back as soon as there is room.
-- iOS sizes a keyboard in several steps when it opens (no height, full screen, then the requested height). Keibord asked for its height again in between, which could leave it collapsed (only 🌐 and the microphone) or empty. It now asks only once iOS is done: 0.5 s and 1.5 s after opening, and only if the height is still wrong.
-- If the keyboard still opens collapsed or empty: open Keibord right away → Data → Keyboard Log → Copy, and send it. It shows what iOS did (never what you type).
+- Your logs showed that iOS always gave Keibord 241 pt, whatever it asked for afterwards, and that iOS sometimes loaded the keyboard without ever announcing it, so no keys were drawn (blank or collapsed until reopened).
+- Keibord now draws its keys and sets its full height while it loads, before iOS decides how tall the keyboard is, and keeps that one height request instead of asking again and again (which never helped and could confuse iOS).
+- If iOS loads the keyboard and does not announce it within a second, it now prepares itself anyway and notes it in the Keyboard Log.
+- Where a host keeps keyboards low (Spotlight: 241 pt), the number row still makes way so the keys keep their size.
 
 Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboard), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.

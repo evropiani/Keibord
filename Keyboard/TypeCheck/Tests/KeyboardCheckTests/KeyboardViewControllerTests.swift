@@ -136,17 +136,32 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertTrue(vc.view.backgroundColor === UIColor.touchableClear, "dark theme on the dark backdrop: the system's glass")
     }
 
-    func testHeightIsRequestedAgainOnceTheKeyboardIsOnScreen() {
-        start()
-        let requested = height
-        XCTAssertGreaterThan(requested, 0)
-        let first = vc.view.heightAnchor.testConstraints.last
+    /// iOS takes the height it finds while the keyboard loads (it kept a 241 pt placeholder whatever
+    /// was asked later): the right height is set then, on one constraint that is only ever changed.
+    func testTheHeightIsSetWhileLoadingOnOneConstraint() {
+        var settings = KeibordSettings()
+        settings.appearance.showNumberRow = true
+        KeibordStore.shared.saveSettings(settings)
+        proxy = TestProxy()
+        vc = KeyboardViewController()
+        vc.testProxy = proxy
+        vc.testTraitCollection = UITraitCollection(testStyle: .light)
+        vc.viewDidLoad()
+        let full = 36 + KeyboardMetrics.standard(height: .standard, landscape: false).keyboardHeight(rows: 5)
+        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, 1)
+        XCTAssertEqual(height, full, "the full height before the keyboard appears")
+        XCTAssertEqual(vc.preferredContentSize.height, full)
+        XCTAssertNotNil(keyView("a"), "keys before the keyboard appears")
+        vc.viewWillAppear(false)
         vc.viewDidAppear(false)
-        let again = vc.view.heightAnchor.testConstraints.last
-        XCTAssertFalse(first === again, "a new constraint asks the system again")
-        XCTAssertEqual(first?.isActive, false)
-        XCTAssertEqual(again?.isActive, true)
-        XCTAssertEqual(again?.constant, requested)
+        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 0)
+        vc.viewDidLayoutSubviews()
+        wait(0.6)
+        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, 1, "never replaced")
+        XCTAssertEqual(vc.view.heightAnchor.testConstraints.first?.isActive, true)
+        send(.switchPage(.numbers))
+        XCTAssertEqual(height, full)
+        vc.viewWillDisappear(false)
     }
 
     func testKeysStayInsideTheSafeAreaInLandscape() {
@@ -379,6 +394,22 @@ final class KeyboardViewControllerTests: XCTestCase {
 
     // MARK: Blank or collapsed keyboard
 
+    func testAClosedKeyboardControllerIsReleased() {
+        weak var released: KeyboardViewController?
+        start()
+        vc.viewDidAppear(false)
+        type("servus ")
+        send(.emoji)
+        send(.switchPage(.letters))
+        vc.viewWillDisappear(false)
+        vc.waitForPendingWrites()
+        released = vc
+        vc = nil
+        proxy = nil
+        wait(2) // scheduled checks and refreshes run out
+        XCTAssertNil(released, "the keyboard controller leaked")
+    }
+
     func testKeysAreShownWhenTheSystemSkipsViewWillAppear() {
         proxy = TestProxy()
         vc = KeyboardViewController()
@@ -390,19 +421,17 @@ final class KeyboardViewControllerTests: XCTestCase {
         vc.viewWillDisappear(false)
     }
 
-    func testACollapsedKeyboardAsksForItsHeightAgain() {
-        start()
-        vc.viewDidAppear(false)
-        let wanted = height
-        let before = vc.view.heightAnchor.testConstraints.count
-        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 0) // only 🌐 and the microphone are left
-        vc.viewDidLayoutSubviews()
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, before, "no request while iOS is still sizing the keyboard")
-        wait(0.6)
-        XCTAssertGreaterThan(vc.view.heightAnchor.testConstraints.count, before, "asked again")
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.last?.constant, wanted)
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.last?.isActive, true)
-        vc.viewWillDisappear(false)
+    func testAKeyboardLoadedButNeverAnnouncedIsLoggedAndPrepared() {
+        KeyboardLog.shared.clear()
+        proxy = TestProxy()
+        vc = KeyboardViewController()
+        vc.testProxy = proxy
+        vc.testTraitCollection = UITraitCollection(testStyle: .light)
+        vc.viewDidLoad() // and then no viewWillAppear/viewDidAppear
+        wait(1.2)
+        KeyboardLog.shared.flush()
+        XCTAssertTrue(KeyboardLog.shared.read().contains("not announced as shown"))
+        XCTAssertNotNil(keyView("a"))
     }
 
     func testTheKeyboardLogRecordsOpeningAndClosingButNoTypedText() {
@@ -413,7 +442,7 @@ final class KeyboardViewControllerTests: XCTestCase {
         vc.viewWillDisappear(false)
         KeyboardLog.shared.flush()
         let log = KeyboardLog.shared.read()
-        for event in ["loading", "appear: text field", "on screen", "close"] {
+        for event in ["loading", "height wanted", "appear: text field", "on screen", "close"] {
             XCTAssertTrue(log.contains(event), "\(event) missing in\n\(log)")
         }
         XCTAssertFalse(log.contains("geheim"))

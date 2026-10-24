@@ -470,12 +470,15 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   field can change). `viewWillDisappear` → flush learning delta in the background
   (`performExpiringActivity` keeps the extension running until the write is done; the main thread
   never waits for a file). Flush also every 25 committed words.
-  Height: requested once the keyboard is on screen (viewDidAppear) and re-requested only by the
-  self-checks 0.5 s and 1.5 s after appearing, never from layout passes (iOS sizes a keyboard in
-  several steps: no height, full screen, final height; requests in between left it collapsed or
-  blank). The self-checks also render again when no keys are drawn (also when `viewWillAppear` was
-  skipped). When the system keeps the keyboard too low for the number row (rows < 85 % of their
-  height, e.g. Spotlight), the number row is hidden; the full height is still requested.
+  Height: keys and height are set in viewDidLoad (iOS takes the height it finds while the keyboard
+  loads; logs showed it keeping a 241 pt placeholder whatever was requested after appearing), on one
+  `view.heightAnchor` constraint (priority 999) that is only ever changed, never replaced, plus
+  `preferredContentSize` (no `allowsSelfSizing`, no re-requests: they never changed iOS's height and
+  could leave the keyboard collapsed or blank). Self-checks 0.5 s/1.5 s after appearing render again
+  when no keys are drawn and log the height iOS kept; 1 s after loading, a keyboard never announced
+  as shown (no viewWillAppear/viewDidAppear) is logged and prepared if it is in a window. When the
+  system keeps the keyboard too low for the number row (rows < 85 % of their height, e.g. Spotlight's
+  241 pt window), the number row is hidden; the full height is still requested.
   `KeyboardLog` (`keyboard-log.txt` in the shared folder, appended, trimmed at 64 KB) records
   opening/closing, sizes, memory footprint, height retries and main-thread stalls
   (`MainThreadWatchdog`, while visible) – never typed text. The app shows it in Data → Keyboard Log.
