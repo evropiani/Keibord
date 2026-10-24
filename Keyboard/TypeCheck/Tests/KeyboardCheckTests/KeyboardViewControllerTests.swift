@@ -310,21 +310,49 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(height, letters)
     }
 
-    /// Spotlight keeps keyboards lower than requested: all five rows squeezed in made tiny keys.
-    func testTheNumberRowMakesWayWhenTheSystemKeepsTheKeyboardLow() {
+    /// iOS keeps some keyboards at 241 pt. The number row stays as set (it used to come and go from
+    /// app to app), and the row gaps give way before the keys get lower.
+    func testALowKeyboardKeepsTheNumberRowAndTheKeyHeight() {
         var settings = KeibordSettings()
         settings.appearance.showNumberRow = true
         start(settings: settings)
         let full = height
-        XCTAssertEqual(keyboard.layout?.rows.count, 5)
-        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 240)
+        vc.view.frame = CGRect(x: 0, y: 0, width: 440, height: 241)
         vc.viewDidLayoutSubviews()
-        XCTAssertEqual(keyboard.layout?.rows.count, 4, "number row hidden")
+        XCTAssertEqual(keyboard.layout?.rows.count, 5, "the number row stays")
         XCTAssertEqual(height, full, "the full height is still requested")
-        XCTAssertGreaterThan(keyView("a")?.frame.height ?? 0, 37, "keys keep nearly their size")
-        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: full)
+        XCTAssertGreaterThan(keyView("a")?.frame.height ?? 0, 34, "five rows in 205 pt: only the gaps are minimal")
+        settings.appearance.showNumberRow = false
+        KeibordStore.shared.saveSettings(settings)
+        markChangedByTheApp(.settings)
+        vc.viewWillDisappear(false)
+        vc.viewWillAppear(false)
         vc.viewDidLayoutSubviews()
-        XCTAssertEqual(keyboard.layout?.rows.count, 5, "back once there is room")
+        XCTAssertEqual(keyboard.layout?.rows.count, 4)
+        XCTAssertEqual(keyView("a")?.frame.height, KeyboardMetrics.standard(height: .standard, landscape: false).keyHeight,
+                       "four rows in 241 pt keep the full key height")
+    }
+
+    /// iOS applies height changes made once the keyboard is on screen: when it kept 241 pt, the request
+    /// is changed once for real (a point more, then back), on the same constraint.
+    func testAnIgnoredHeightIsChangedOnceAfterAppearing() {
+        KeyboardLog.shared.clear()
+        start()
+        vc.viewDidAppear(false)
+        let wanted = height
+        vc.view.frame = CGRect(x: 0, y: 0, width: 440, height: 241)
+        vc.viewDidLayoutSubviews()
+        wait(0.6)
+        XCTAssertEqual(height, wanted + 1, "changed for real")
+        wait(0.3)
+        XCTAssertEqual(height, wanted, "and back")
+        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, 1)
+        wait(1.0)
+        KeyboardLog.shared.flush()
+        let log = KeyboardLog.shared.read()
+        XCTAssertEqual(log.components(separatedBy: "changing the request once").count - 1, 1, "only once per appearance")
+        XCTAssertTrue(log.contains("iOS keeps height 241"))
+        vc.viewWillDisappear(false)
     }
 
     func testLanguageKeySwitchesLayoutAndSpaceLabel() {

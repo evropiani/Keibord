@@ -36,16 +36,19 @@ public struct KeyboardMetrics: Hashable, Sendable {
         topInset + rowPitch * CGFloat(rows) + bottomInset
     }
 
+    /// Smallest gap between two rows when the key area is squeezed (see `fitted`).
+    public static let minimumRowGap: CGFloat = 4
+
     /// These metrics squeezed into a key area of `height` points when the system made the keyboard
-    /// lower than it asked for: keys and gaps shrink in proportion, so no row is cut off. Unchanged
-    /// when `height` is enough or not known yet (≤ 0).
+    /// lower than it asked for, so no row is cut off. The gaps between rows give way first (down to
+    /// `minimumRowGap`), so the keys keep their full height as long as possible; only then do the keys
+    /// get lower. Touch areas still fill the rows. Unchanged when `height` is enough or not known yet (≤ 0).
     public func fitted(toHeight height: CGFloat, rows: Int) -> KeyboardMetrics {
         guard rows > 0, height > 0, height < keyboardHeight(rows: rows) - 0.5 else { return self }
-        let available = height - topInset - bottomInset
-        let scale = max(0.2, available / (rowPitch * CGFloat(rows)))
+        let pitch = max(1, height - topInset - bottomInset) / CGFloat(rows)
         var fitted = self
-        fitted.rowPitch = rowPitch * scale
-        fitted.keyHeight = keyHeight * scale
+        fitted.rowPitch = pitch
+        fitted.keyHeight = max(1, min(keyHeight, pitch - min(Self.minimumRowGap, pitch * 0.15)))
         return fitted
     }
 }

@@ -44,10 +44,20 @@ final class LayoutGeometryTests: XCTestCase {
         XCTAssertEqual(m.fitted(toHeight: m.keyboardHeight(rows: 4), rows: 4), m)
         XCTAssertEqual(m.fitted(toHeight: 400, rows: 4), m, "more room than needed: unchanged")
         XCTAssertEqual(m.fitted(toHeight: 0, rows: 4), m, "height not known yet")
+        // iOS's 241 pt keyboard minus the suggestion bar: the row gaps give way, the keys keep their height.
+        let slightly = m.fitted(toHeight: 205, rows: 4)
+        XCTAssertEqual(slightly.keyboardHeight(rows: 4), 205, accuracy: 0.001)
+        XCTAssertEqual(slightly.keyHeight, m.keyHeight)
+        XCTAssertGreaterThanOrEqual(slightly.rowPitch - slightly.keyHeight, KeyboardMetrics.minimumRowGap)
+        // Five rows in the same room: gaps at their minimum, then the keys get lower.
+        let five = m.fitted(toHeight: 205, rows: 5)
+        XCTAssertEqual(five.keyboardHeight(rows: 5), 205, accuracy: 0.001)
+        XCTAssertEqual(five.rowPitch - five.keyHeight, KeyboardMetrics.minimumRowGap, accuracy: 0.001)
+        XCTAssertLessThan(five.keyHeight, m.keyHeight)
         let fitted = m.fitted(toHeight: 180, rows: 4)
         XCTAssertEqual(fitted.keyboardHeight(rows: 4), 180, accuracy: 0.001)
-        XCTAssertEqual(fitted.keyHeight / fitted.rowPitch, m.keyHeight / m.rowPitch, accuracy: 0.001)
         XCTAssertEqual(fitted.horizontalGap, m.horizontalGap)
+        XCTAssertGreaterThan(m.fitted(toHeight: 20, rows: 4).keyHeight, 0, "never negative")
         let layout = LayoutFactory.layout(for: LayoutRequest(language: .deAT, base: .qwertz, page: .letters, variant: .standard,
                                                              showNumberRow: false, showLanguageKey: true, showGlobeKey: false, returnKind: .default))
         let frames = LayoutGeometry.frames(for: layout, width: 440, metrics: fitted)

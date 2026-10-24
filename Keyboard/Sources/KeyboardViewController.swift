@@ -28,9 +28,10 @@ final class KeyboardViewController: UIInputViewController {
     private var appeared = false
     /// Counts appearances, so checks scheduled for an earlier one do nothing.
     private var appearanceCount = 0
-    /// The system gave the keyboard enough height for the number row (it is hidden when it would
-    /// squeeze every row, e.g. in Spotlight, which keeps keyboards at a fixed lower height).
-    private var numberRowFits = true
+    /// The height request was changed once in this appearance because iOS kept another height.
+    private var heightNudged = false
+    /// While the height request is changed once, layout passes must not set it back right away.
+    private var nudgingHeight = false
     /// viewWillAppear ran for the current appearance (it was not always called: the keyboard then
     /// appeared without keys).
     private var preparedForAppearance = false
@@ -40,8 +41,6 @@ final class KeyboardViewController: UIInputViewController {
     private weak var touchDelaysDisabledFor: UIView?
     /// When the keyboard checks, after appearing, that its keys are drawn and its height was applied.
     private static let recheckDelays: [TimeInterval] = [0.5, 1.5]
-    /// The number row is hidden when the rows would shrink below this share of their normal height.
-    private static let minimumRowScale: CGFloat = 0.85
 
     private enum Mode: Equatable { case keys, emoji, emojiSearch, cardUnlock(UUID) }
     private var mode: Mode = .keys
@@ -172,6 +171,7 @@ final class KeyboardViewController: UIInputViewController {
     /// that get their height on iOS 26 do). Replacing the constraint and asking again after appearing
     /// never changed the height iOS chose and could leave the keyboard collapsed or blank.
     private func applyHeight() {
+        guard !nudgingHeight else { return }
         if let h = heightConstraint {
             if h.constant != requestedHeight { h.constant = requestedHeight }
         } else {
@@ -192,6 +192,7 @@ final class KeyboardViewController: UIInputViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self = self, self.appeared, self.appearanceCount == appearance else { return }
                 self.ensureKeysAreShown()
+                if index == 0 { self.nudgeHeightIfIgnored() }
                 if index == Self.recheckDelays.count - 1, abs(self.view.bounds.height - self.requestedHeight) > 1 {
                     KeyboardLog.shared.add("iOS keeps height \(Int(self.view.bounds.height)) instead of \(Int(self.requestedHeight))")
                 }
@@ -199,17 +200,23 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    /// Hides the number row while the system keeps the keyboard too low for it, so the other rows keep
-    /// (nearly) their normal size instead of all of them shrinking; it comes back once there is room.
-    /// The full height is still requested.
-    private func updateNumberRowFit() {
-        guard controller != nil, settings.appearance.showNumberRow, mode == .keys, view.bounds.height > 0 else { return }
-        let metrics = KeyboardMetrics.standard(height: settings.appearance.keyHeight, landscape: isLandscape)
-        let fits = view.bounds.height - Self.barHeight >= metrics.keyboardHeight(rows: 5) * Self.minimumRowScale
-        guard fits != numberRowFits else { return }
-        numberRowFits = fits
-        KeyboardLog.shared.add(fits ? "room for the number row again" : "height \(Int(view.bounds.height)): number row hidden so the keys keep their size")
-        render()
+    /// iOS applies a height change made once the keyboard is on screen (Apple's guide), but in some apps
+    /// (e.g. after switching from another keyboard) it kept its default height (241 pt) instead of the
+    /// one set while loading. The request is then changed for real once: a point more, then back.
+    /// (Replacing the constraint with an identical one, as earlier versions did, changed nothing.)
+    private func nudgeHeightIfIgnored() {
+        guard appeared, !heightNudged, view.bounds.height > 0, view.bounds.height < requestedHeight - 1,
+              let h = heightConstraint else { return }
+        heightNudged = true
+        nudgingHeight = true
+        KeyboardLog.shared.add("height \(Int(view.bounds.height)) instead of \(Int(requestedHeight)): changing the request once")
+        h.constant = requestedHeight + 1
+        preferredContentSize = CGSize(width: view.bounds.width, height: requestedHeight + 1)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self = self else { return }
+            self.nudgingHeight = false
+            self.applyHeight()
+        }
     }
 
     private func ensureKeysAreShown() {
@@ -234,6 +241,7 @@ final class KeyboardViewController: UIInputViewController {
         MainThreadWatchdog.shared.start(for: self)
         fullAccess = hasFullAccess
         appearanceCount += 1
+        heightNudged = false
         // Before reloading: a settings change renders right away (controller delegate), which must not
         // configure the emoji panel (loading the emoji catalog) the keyboard was dismissed in.
         mode = .keys
@@ -273,8 +281,8 @@ final class KeyboardViewController: UIInputViewController {
             prepareForAppearance()
         }
         disableSystemTouchDelays()
-        // Should iOS keep the keyboard lower than requested, the number row makes way and the rows
-        // shrink to fit (KeyboardView), so no row is cut off.
+        // Should iOS keep the keyboard lower than requested, the row gaps and then the keys shrink to
+        // fit (KeyboardView), so no row is cut off; the request is changed once (checkAfterAppearing).
         appeared = true
         KeyboardLog.shared.add("on screen: view \(Self.sizeText(view.bounds.size)), window \(Self.sizeText(view.window?.bounds.size ?? .zero))")
         checkAfterAppearing()
@@ -319,7 +327,6 @@ final class KeyboardViewController: UIInputViewController {
             KeyboardLog.shared.add("size \(Self.sizeText(view.bounds.size)) (wanted height \(Int(requestedHeight)))")
         }
         applyHeight()
-        updateNumberRowFit()
         layoutChildren()
         // The system may move the keyboard into other container views after it appeared.
         if appeared, view.window != nil, touchDelaysDisabledFor !== view.superview { disableSystemTouchDelays() }
@@ -639,8 +646,9 @@ final class KeyboardViewController: UIInputViewController {
         let baseMetrics = KeyboardMetrics.standard(height: settings.appearance.keyHeight, landscape: isLandscape)
         let field = controller.field
         let searching = mode == .emojiSearch
-        let numberRowWanted = settings.appearance.showNumberRow && !searching
-        let numberRow = numberRowWanted && numberRowFits
+        // The number row follows the setting only (it used to make way in low keyboards, so it came and
+        // went from app to app).
+        let numberRow = settings.appearance.showNumberRow && !searching
         // Known once the text field is connected (viewWillLayoutSubviews renders again if it differs).
         let globeKey = proxyConnected ? needsInputModeSwitchKey : false
         renderedGlobeKey = globeKey
@@ -659,8 +667,7 @@ final class KeyboardViewController: UIInputViewController {
         let layout = self.layout(for: request)
         let isPad = request.variant == .numberPad || request.variant == .decimalPad
         let rows = max(layout.rows.count, isPad ? 4 : (numberRow ? 5 : 4))
-        // The full height is requested even while the number row is hidden for lack of room.
-        let keysHeight = baseMetrics.keyboardHeight(rows: max(rows, numberRowWanted && !isPad ? 5 : 4))
+        let keysHeight = baseMetrics.keyboardHeight(rows: rows)
         let total = (searching ? Self.searchBarHeight : Self.barHeight) + keysHeight
         requestedHeight = total
         applyHeight()

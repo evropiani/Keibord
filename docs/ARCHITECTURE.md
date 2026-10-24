@@ -474,14 +474,15 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   field (`proxyConnected`: viewWillAppear or textDidChange): reading `documentIdentifier` while
   loading crashed the keyboard (1.0.14). The field is configured in viewWillAppear.
   Height: keys and height are set in viewDidLoad (iOS takes the height it finds while the keyboard
-  loads; logs showed it keeping a 241 pt placeholder whatever was requested after appearing), on one
-  `view.heightAnchor` constraint (priority 999) that is only ever changed, never replaced, plus
-  `preferredContentSize` (no `allowsSelfSizing`, no re-requests: they never changed iOS's height and
-  could leave the keyboard collapsed or blank). Self-checks 0.5 s/1.5 s after appearing render again
-  when no keys are drawn and log the height iOS kept; 1 s after loading, a keyboard never announced
-  as shown (no viewWillAppear/viewDidAppear) is logged and prepared if it is in a window. When the
-  system keeps the keyboard too low for the number row (rows < 85 % of their height, e.g. Spotlight's
-  241 pt window), the number row is hidden; the full height is still requested.
+  loads), on one `view.heightAnchor` constraint (priority 999) that is only ever changed, never
+  replaced, plus `preferredContentSize`; no `allowsSelfSizing` (1.0.3–1.0.13 set it, and iOS kept its
+  default 241 pt in every app). When iOS still keeps another height (some apps, e.g. after switching
+  from another keyboard), the request is changed for real once, 0.5 s after appearing (+1 pt, then
+  back): Apple applies height changes made once the keyboard is on screen. Self-checks 0.5 s/1.5 s
+  after appearing render again when no keys are drawn and log the height iOS kept; 1 s after loading,
+  a keyboard never announced as shown is logged and prepared if it is in a window. The number row
+  follows the setting only. In a lower key area the row gaps give way first (down to 4 pt), then the
+  keys (`KeyboardMetrics.fitted`).
   `KeyboardLog` (`keyboard-log.txt` in the shared folder, appended, trimmed at 64 KB) records
   opening/closing, sizes, memory footprint, height retries and main-thread stalls
   (`MainThreadWatchdog`, while visible) – never typed text. The app shows it in Data → Keyboard Log.
