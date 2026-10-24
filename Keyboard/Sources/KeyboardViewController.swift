@@ -77,6 +77,10 @@ final class KeyboardViewController: UIInputViewController {
     private var linkHintExpanded = false
     /// The document as of the controller's last update (see `textDidChange`).
     private var documentSnapshot: DocumentSnapshot?
+    /// iOS connected the text field (viewWillAppear or a text callback came). Before that the document
+    /// proxy has no document: reading its identifier crashed the keyboard (1.0.14 did it while loading,
+    /// earlier versions when the learned words finished loading before the keyboard was shown).
+    private var proxyConnected = false
     /// Whether the last render included the globe key (`needsInputModeSwitchKey`).
     private var renderedGlobeKey: Bool?
 
@@ -141,9 +145,8 @@ final class KeyboardViewController: UIInputViewController {
 
         // Keys and height right away: iOS takes the height it finds while the keyboard loads (it kept
         // 241 pt, the placeholder height, whatever was asked later), and it did not always announce the
-        // keyboard's appearance (viewWillAppear), which left it without keys.
-        controller.configure(field: FieldContextMapper.context(for: textDocumentProxy))
-        if startsOnNumbersPage { controller.handle(.switchPage(.numbers)) }
+        // keyboard's appearance (viewWillAppear), which left it without keys. Nothing is read from the
+        // text field yet (see `proxyConnected`): the field is configured when the keyboard appears.
         render()
         KeyboardLog.shared.add(String(format: "loaded in %.0f ms", Date().timeIntervalSince(loadStart) * 1000)
                                + ", height wanted \(Int(requestedHeight))" + (inputView == nil ? " (no input view)" : ""))
@@ -227,6 +230,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func prepareForAppearance() {
         preparedForAppearance = true
+        proxyConnected = true
         MainThreadWatchdog.shared.start(for: self)
         fullAccess = hasFullAccess
         appearanceCount += 1
@@ -305,7 +309,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillLayoutSubviews()
         // `needsInputModeSwitchKey` can change after viewWillAppear (Apple's template checks it here):
         // add or remove the globe key then, not only at the next keystroke.
-        if controller != nil, renderedGlobeKey != nil, renderedGlobeKey != needsInputModeSwitchKey { render() }
+        if controller != nil, proxyConnected, renderedGlobeKey != nil, renderedGlobeKey != needsInputModeSwitchKey { render() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -353,6 +357,7 @@ final class KeyboardViewController: UIInputViewController {
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         guard controller != nil else { return }
+        proxyConnected = true
         let field = FieldContextMapper.context(for: textDocumentProxy)
         if field != controller.field {
             controller.configure(field: field) // re-syncs the document too
@@ -552,7 +557,7 @@ final class KeyboardViewController: UIInputViewController {
         case .system:
             // An app may ask for a light or a dark keyboard; otherwise the iPhone's appearance decides. The
             // keyboard's own trait collection is only a fallback: it could stay dark in light mode.
-            switch textDocumentProxy.keyboardAppearance ?? .default {
+            switch (proxyConnected ? textDocumentProxy.keyboardAppearance : nil) ?? .default {
             case .dark: return true
             case .light: return false
             default:
@@ -575,7 +580,7 @@ final class KeyboardViewController: UIInputViewController {
 
     /// Fields for numbers and punctuation (house numbers, times, IP addresses) open on the "123" page,
     /// as with the system keyboard.
-    private var startsOnNumbersPage: Bool { (textDocumentProxy.keyboardType ?? .default) == .numbersAndPunctuation }
+    private var startsOnNumbersPage: Bool { proxyConnected && (textDocumentProxy.keyboardType ?? .default) == .numbersAndPunctuation }
 
     // MARK: Rendering
 
@@ -636,7 +641,8 @@ final class KeyboardViewController: UIInputViewController {
         let searching = mode == .emojiSearch
         let numberRowWanted = settings.appearance.showNumberRow && !searching
         let numberRow = numberRowWanted && numberRowFits
-        let globeKey = needsInputModeSwitchKey
+        // Known once the text field is connected (viewWillLayoutSubviews renders again if it differs).
+        let globeKey = proxyConnected ? needsInputModeSwitchKey : false
         renderedGlobeKey = globeKey
         // The emoji panel and the CVV pad take the height of the letter keys they replace.
         let request = LayoutRequest(
@@ -664,7 +670,7 @@ final class KeyboardViewController: UIInputViewController {
             let multiple = settings.activeLanguages.count > 1
             let spaceLabel = settings.appearance.showSpaceLanguageLabel && multiple ? controller.language.displayName : controller.language.spaceKeyLabel
             // The return key is dimmed (and inactive) only when both the field and the context agree it is empty.
-            let empty = !textDocumentProxy.hasText && (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty
+            let empty = !proxyConnected || !textDocumentProxy.hasText && (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty
                 && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
             keyboardView.languages = settings.activeLanguages
             // While searching emoji, keys type into the query: no trackpad, and letters arrive lower-case.
@@ -762,7 +768,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private var documentIsEmpty: Bool {
-        (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
+        !proxyConnected
+            || (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
     }
 
     /// Why the settings, details and learning of the Keibord app cannot reach this keyboard.
@@ -989,7 +996,7 @@ private func writeLearning(_ delta: UserModelDelta, to store: KeibordStore) -> L
 
 extension KeyboardViewController: InputControllerDelegate {
     func controllerStateDidChange(_ controller: InputController) {
-        documentSnapshot = DocumentSnapshot(textDocumentProxy)
+        documentSnapshot = proxyConnected ? DocumentSnapshot(textDocumentProxy) : nil
         guard mode == .keys || mode == .emojiSearch else { return }
         render()
     }

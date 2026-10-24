@@ -7,7 +7,18 @@ import KeibordCore
 final class TestProxy: UITextDocumentProxy {
     var text = ""
     var cursor = 0
-    var documentIdentifier = UUID()
+    /// False until iOS connects the text field: the real proxy then has no document, and reading
+    /// `documentIdentifier` (a non-optional UUID in Swift) crashes the keyboard.
+    var connected = true
+    private(set) var identifierReadWhileDisconnected = false
+    private var identifier = UUID()
+    var documentIdentifier: UUID {
+        get {
+            if !connected { identifierReadWhileDisconnected = true }
+            return identifier
+        }
+        set { identifier = newValue }
+    }
     var keyboardType: UIKeyboardType? = .default
     var keyboardAppearance: UIKeyboardAppearance? = .default
     var returnKeyType: UIReturnKeyType? = .default
@@ -418,6 +429,31 @@ final class KeyboardViewControllerTests: XCTestCase {
         vc.viewDidLoad()
         vc.viewDidAppear(false) // no viewWillAppear: nothing was rendered before
         XCTAssertNotNil(keyView("a"), "the keyboard opened blank")
+        vc.viewWillDisappear(false)
+    }
+
+    /// 1.0.14 read the document identifier while loading: the keyboard crashed before it was shown,
+    /// every time. Learned words that finished loading before viewWillAppear did the same now and then.
+    func testNothingReadsTheDocumentBeforeIOSConnectsIt() {
+        var model = UserModel()
+        model.words["leiwand"] = LearnedWord(count: 5, lastUsedDay: 20_000, language: "de-AT")
+        KeibordStore.shared.saveUserModel(model)
+        proxy = TestProxy()
+        proxy.connected = false
+        vc = KeyboardViewController()
+        vc.testProxy = proxy
+        vc.testTraitCollection = UITraitCollection(testStyle: .light)
+        vc.viewDidLoad()
+        wait(0.4) // the learned words load and refresh the suggestions
+        vc.viewWillLayoutSubviews()
+        vc.viewDidLayoutSubviews()
+        XCTAssertFalse(proxy.identifierReadWhileDisconnected, "the keyboard would crash while loading")
+        XCTAssertNotNil(keyView("a"), "keys while loading")
+        proxy.connected = true
+        vc.viewWillAppear(false)
+        vc.viewDidAppear(false)
+        type("servus ")
+        XCTAssertEqual(proxy.text, "Servus ")
         vc.viewWillDisappear(false)
     }
 

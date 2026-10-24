@@ -470,6 +470,9 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   field can change). `viewWillDisappear` → flush learning delta in the background
   (`performExpiringActivity` keeps the extension running until the write is done; the main thread
   never waits for a file). Flush also every 25 committed words.
+  Nothing is read from `textDocumentProxy` (and `needsInputModeSwitchKey`) before iOS connects the
+  field (`proxyConnected`: viewWillAppear or textDidChange): reading `documentIdentifier` while
+  loading crashed the keyboard (1.0.14). The field is configured in viewWillAppear.
   Height: keys and height are set in viewDidLoad (iOS takes the height it finds while the keyboard
   loads; logs showed it keeping a 241 pt placeholder whatever was requested after appearing), on one
   `view.heightAnchor` constraint (priority 999) that is only ever changed, never replaced, plus

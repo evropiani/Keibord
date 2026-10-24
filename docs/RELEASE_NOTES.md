@@ -1,8 +1,6 @@
-Keibord 1.0.14: full height and keys from the first moment.
+Keibord 1.0.15: fixes 1.0.14, which did not open at all.
 
-- Your logs showed that iOS always gave Keibord 241 pt, whatever it asked for afterwards, and that iOS sometimes loaded the keyboard without ever announcing it, so no keys were drawn (blank or collapsed until reopened).
-- Keibord now draws its keys and sets its full height while it loads, before iOS decides how tall the keyboard is, and keeps that one height request instead of asking again and again (which never helped and could confuse iOS).
-- If iOS loads the keyboard and does not announce it within a second, it now prepares itself anyway and notes it in the Keyboard Log.
-- Where a host keeps keyboards low (Spotlight: 241 pt), the number row still makes way so the keys keep their size.
+- 1.0.14 read the text field's identifier while the keyboard was loading, before iOS had connected the field. iOS has none to give then, and the keyboard crashed every time it opened. The keyboard now reads nothing from the text field until iOS connects it; the keys and the height are still set while it loads.
+- Everything else from 1.0.14 stays: one height request set while loading, keys drawn even if iOS does not announce the keyboard, the number row making way where a host keeps keyboards low (Spotlight).
 
 Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboard), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.
