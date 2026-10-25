@@ -478,9 +478,9 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   constraint, `preferredContentSize` or +1 pt changes): `inputView.allowsSelfSizing = true`, the
   requested height on `view` and on an invisible sizer pinned to its edges (both priority 999), set
   in viewDidLoad (after rendering, so it is the full height), replaced by new constraints in
-  viewDidAppear and again (≤ 3 times, 0.1 s·n later) while the system keeps another height. iOS keeps
-  the height it settles on when the keyboard first opens until the iPhone restarts, so a fix takes
-  effect after a restart. Keys are drawn in viewDidLoad; the self-checks 0.5 s/1.5 s after appearing
+  viewDidAppear and again (≤ 3 times, 0.1 s·n later) while the system keeps another height. Confirmed
+  on an iPhone (iOS 27): with `allowsSelfSizing` the keyboard got its full height in every app at once
+  (no restart needed); never remove it. Keys are drawn in viewDidLoad; the self-checks 0.5 s/1.5 s after appearing
   render again when no keys are drawn and log the height iOS kept; 1 s after loading, a keyboard never
   announced as shown is logged and prepared if it is in a window. Should the view outgrow its window,
   the keys are laid out in the visible part. The number row follows the setting only. In a lower key
