@@ -20,18 +20,21 @@ final class KeyboardViewController: UIInputViewController {
     private var emojiPanelAdded = false
     private var emojiSearchBarAdded = false
     private var cardUnlockAdded = false
-    /// The keyboard's height (see `applyHeight`).
+    /// The keyboard's height (see `installHeightConstraint`).
     private var heightConstraint: NSLayoutConstraint?
+    /// Invisible view pinned to all edges that carries the keyboard's height as well, so the height also
+    /// comes from the content, not only from the view itself.
+    private let heightSizer = UIView()
+    private var sizerHeightConstraint: NSLayoutConstraint?
     /// Height of the suggestion bar plus the keys, as computed by `render()`.
     private var requestedHeight: CGFloat = 260
     /// The keyboard has appeared on screen.
     private var appeared = false
     /// Counts appearances, so checks scheduled for an earlier one do nothing.
     private var appearanceCount = 0
-    /// Height requests made again in this appearance because iOS laid the keyboard out at another
-    /// height (bounded: iOS and the keyboard must not resize each other forever).
-    private var heightReapplies = 0
-    private static let maxHeightReapplies = 6
+    /// Height requests repeated in this appearance because the system kept another height.
+    private var heightRetries = 0
+    private static let maxHeightRetries = 3
     /// viewWillAppear ran for the current appearance (it was not always called: the keyboard then
     /// appeared without keys).
     private var preparedForAppearance = false
@@ -141,15 +144,27 @@ final class KeyboardViewController: UIInputViewController {
         suggestionBar.delegate = self
         keyboardView.delegate = self
         keyboardView.inputModeTarget = self
+        heightSizer.isUserInteractionEnabled = false
+        heightSizer.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(heightSizer)
+        NSLayoutConstraint.activate([
+            heightSizer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            heightSizer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            heightSizer.topAnchor.constraint(equalTo: view.topAnchor),
+            heightSizer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
         view.addSubview(suggestionBar)
         view.addSubview(keyboardView)
+        // The keyboard sizes itself instead of taking the system keyboard's height. Versions without this
+        // (1.0.14–1.0.17) got 241 or 224 pt everywhere; with it iOS had given the full height.
+        inputView?.allowsSelfSizing = true
 
-        // The system sizes the keyboard's view; its height constraint is added once it is on screen.
-        view.translatesAutoresizingMaskIntoConstraints = true
-        // Keys right away: iOS did not always announce the keyboard's appearance (viewWillAppear), which
-        // left it without keys. Nothing is read from the text field yet (see `proxyConnected`): the field
-        // is configured when the keyboard appears.
+        // Keys and the full height right away, before iOS sizes the keyboard: iOS keeps the height it
+        // settles on when the keyboard first opens (until the iPhone restarts), and it did not always
+        // announce the appearance (viewWillAppear), which left the keyboard without keys. Nothing is read
+        // from the text field yet (see `proxyConnected`): the field is configured when it appears.
         render()
+        installHeightConstraint()
         KeyboardLog.shared.add(String(format: "loaded in %.0f ms", Date().timeIntervalSince(loadStart) * 1000)
                                + ", height wanted \(Int(requestedHeight))" + (inputView == nil ? " (no input view)" : ""))
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.checkShownAfterLoading() }
@@ -169,43 +184,38 @@ final class KeyboardViewController: UIInputViewController {
         KeyboardLog.shared.add("controller released")
     }
 
-    /// The height, set the way Apple's guide shows and azooKey (an open-source keyboard that gets custom
-    /// heights on iOS 26) does it: one *required* constraint on the keyboard's view (priority 999, used
-    /// until 1.0.16, always gave way to iOS's own 241 pt), first activated once the keyboard is on
-    /// screen and afterwards only changed. After every change the system's container is laid out at
-    /// once, which is when iOS takes the new height. `force` re-applies an unchanged height (iOS laid
-    /// the keyboard out at another one).
-    private func applyHeight(force: Bool = false) {
-        guard appeared else { return } // iOS ignores height requests made before the keyboard is on screen
-        let h: NSLayoutConstraint
-        if let existing = heightConstraint {
-            h = existing
-        } else {
-            h = view.heightAnchor.constraint(equalToConstant: requestedHeight)
-            heightConstraint = h
-        }
-        guard force || !h.isActive || h.constant != requestedHeight else { return }
-        h.constant = requestedHeight
+    /// Asks the system for `requestedHeight` with new height constraints (on the keyboard's view and on
+    /// the sizer pinned to its edges): replacing them makes the system measure the keyboard again. This
+    /// is how versions 1.0.3–1.0.13 asked, the only ones iOS 27 gave the full height (logs and recordings:
+    /// a required constraint, preferredContentSize and +1 pt changes were all ignored).
+    private func installHeightConstraint() {
+        heightConstraint?.isActive = false
+        sizerHeightConstraint?.isActive = false
+        let h = view.heightAnchor.constraint(equalToConstant: requestedHeight)
+        h.priority = UILayoutPriority(999)
         h.isActive = true
-        if view.window != nil {
-            UIView.performWithoutAnimation {
-                view.layoutIfNeeded()
-                view.superview?.layoutIfNeeded()
-            }
-        } else {
-            view.setNeedsLayout()
-            view.superview?.layoutIfNeeded()
-        }
+        heightConstraint = h
+        let sizer = heightSizer.heightAnchor.constraint(equalToConstant: requestedHeight)
+        sizer.priority = UILayoutPriority(999)
+        sizer.isActive = true
+        sizerHeightConstraint = sizer
+        view.setNeedsUpdateConstraints()
+        view.setNeedsLayout()
     }
 
-    /// iOS laid the keyboard out at another height than requested after it appeared: request it again
-    /// (a few times per appearance).
-    private func reapplyHeightIfChanged() {
-        guard appeared, heightConstraint?.isActive == true, view.bounds.height > 0,
-              abs(view.bounds.height - requestedHeight) > 1, heightReapplies < Self.maxHeightReapplies else { return }
-        heightReapplies += 1
-        KeyboardLog.shared.add("height \(Int(view.bounds.height)) instead of \(Int(requestedHeight)): requesting it again (\(heightReapplies))")
-        applyHeight(force: true)
+    /// The system laid the keyboard out at another height than requested (it applies requests only
+    /// after the keyboard is on screen, and not reliably in every app): ask again a few times, a moment
+    /// later.
+    private func requestHeightAgainIfIgnored() {
+        guard appeared, view.bounds.height > 0, abs(view.bounds.height - requestedHeight) > 1,
+              heightRetries < Self.maxHeightRetries else { return }
+        heightRetries += 1
+        let attempt = heightRetries
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1 * Double(heightRetries)) { [weak self] in
+            guard let self = self, self.appeared, abs(self.view.bounds.height - self.requestedHeight) > 1 else { return }
+            KeyboardLog.shared.add("height \(Int(self.view.bounds.height)) instead of \(Int(self.requestedHeight)): asking again (\(attempt))")
+            self.installHeightConstraint()
+        }
     }
 
     /// Checks once the system has finished presenting the keyboard that its keys are drawn (and logs
@@ -216,7 +226,6 @@ final class KeyboardViewController: UIInputViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self = self, self.appeared, self.appearanceCount == appearance else { return }
                 self.ensureKeysAreShown()
-                if index == 0 { self.reapplyHeightIfChanged() }
                 if index == Self.recheckDelays.count - 1, abs(self.view.bounds.height - self.requestedHeight) > 1 {
                     KeyboardLog.shared.add("iOS keeps height \(Int(self.view.bounds.height)) instead of \(Int(self.requestedHeight))")
                 }
@@ -246,7 +255,8 @@ final class KeyboardViewController: UIInputViewController {
         MainThreadWatchdog.shared.start(for: self)
         fullAccess = hasFullAccess
         appearanceCount += 1
-        heightReapplies = 0
+        heightRetries = 0
+        inputView?.allowsSelfSizing = true
         // Before reloading: a settings change renders right away (controller delegate), which must not
         // configure the emoji panel (loading the emoji catalog) the keyboard was dismissed in.
         mode = .keys
@@ -286,10 +296,11 @@ final class KeyboardViewController: UIInputViewController {
             prepareForAppearance()
         }
         disableSystemTouchDelays()
-        // The height is requested now that the keyboard is on screen (see `applyHeight`). Should iOS
-        // still keep it lower, the row gaps and then the keys shrink to fit (KeyboardView).
+        // A keyboard can only change its height once it has been drawn on screen: ask again now (and
+        // again if the system still keeps another height). Should the height still fall short, the row
+        // gaps and then the keys shrink to fit (KeyboardView).
         appeared = true
-        applyHeight(force: true)
+        installHeightConstraint()
         KeyboardLog.shared.add("on screen: view \(Self.sizeText(view.bounds.size)), window \(Self.sizeText(view.window?.bounds.size ?? .zero))")
         checkAfterAppearing()
     }
@@ -334,7 +345,7 @@ final class KeyboardViewController: UIInputViewController {
             KeyboardLog.shared.add("size \(Self.sizeText(view.bounds.size)) (wanted height \(Int(requestedHeight)))")
         }
         layoutChildren()
-        if sizeChanged { reapplyHeightIfChanged() }
+        requestHeightAgainIfIgnored()
         // The system may move the keyboard into other container views after it appeared.
         if appeared, view.window != nil, touchDelaysDisabledFor !== view.superview { disableSystemTouchDelays() }
     }
@@ -677,7 +688,8 @@ final class KeyboardViewController: UIInputViewController {
         let keysHeight = baseMetrics.keyboardHeight(rows: rows)
         let total = (searching ? Self.searchBarHeight : Self.barHeight) + keysHeight
         requestedHeight = total
-        applyHeight()
+        if heightConstraint?.constant != total { heightConstraint?.constant = total }
+        if sizerHeightConstraint?.constant != total { sizerHeightConstraint?.constant = total }
 
         if mode == .keys || searching {
             let offsets = touchOffsets(for: layout)

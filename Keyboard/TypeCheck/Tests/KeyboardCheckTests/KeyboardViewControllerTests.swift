@@ -148,10 +148,10 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertTrue(vc.view.backgroundColor === UIColor.touchableClear, "dark theme on the dark backdrop: the system's glass")
     }
 
-    /// The height as Apple's guide and azooKey set it: no request while loading (iOS ignores it), then one
-    /// required constraint once the keyboard is on screen, only changed afterwards, with the system's
-    /// container laid out at once. Priority 999 always gave way to iOS's own 241 pt.
-    func testTheHeightIsARequiredConstraintAddedOnScreen() {
+    /// The height as versions 1.0.3–1.0.13 asked for it, the only ones iOS 27 gave the full height: a
+    /// self-sizing input view, the full height on the view and on a sizer pinned to its edges while the
+    /// keyboard loads, and new constraints once it is on screen.
+    func testTheHeightIsRequestedWhileLoadingAndAgainOnScreen() {
         var settings = KeibordSettings()
         settings.appearance.showNumberRow = true
         KeibordStore.shared.saveSettings(settings)
@@ -159,23 +159,23 @@ final class KeyboardViewControllerTests: XCTestCase {
         vc = KeyboardViewController()
         vc.testProxy = proxy
         vc.testTraitCollection = UITraitCollection(testStyle: .light)
-        let container = UIView(frame: CGRect(x: 0, y: 0, width: 440, height: 241))
-        container.addSubview(vc.view)
+        vc.inputView = UIInputView()
         vc.viewDidLoad()
-        XCTAssertTrue(vc.view.heightAnchor.testConstraints.isEmpty, "no request before the keyboard is on screen")
+        let full = 36 + KeyboardMetrics.standard(height: .standard, landscape: false).keyboardHeight(rows: 5)
+        XCTAssertEqual(vc.inputView?.allowsSelfSizing, true, "1.0.14–1.0.17 left this off and got 241 or 224 pt")
+        let first = vc.view.heightAnchor.testConstraints.last
+        XCTAssertEqual(first?.constant, full, "the full height while loading")
+        XCTAssertEqual(first?.isActive, true)
         XCTAssertNotNil(keyView("a"), "keys before the keyboard appears")
         vc.viewWillAppear(false)
         vc.viewDidAppear(false)
-        let full = 36 + KeyboardMetrics.standard(height: .standard, landscape: false).keyboardHeight(rows: 5)
-        let constraint = vc.view.heightAnchor.testConstraints.last
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, 1)
-        XCTAssertEqual(constraint?.constant, full)
-        XCTAssertEqual(constraint?.isActive, true)
-        XCTAssertEqual(constraint?.priority, .required, "999 always gave way to iOS's own height")
-        XCTAssertTrue(vc.view.translatesAutoresizingMaskIntoConstraints)
+        let again = vc.view.heightAnchor.testConstraints.last
+        XCTAssertFalse(first === again, "a new constraint asks the system again")
+        XCTAssertEqual(first?.isActive, false)
+        XCTAssertEqual(again?.isActive, true)
+        XCTAssertEqual(again?.constant, full)
         send(.switchPage(.numbers))
         XCTAssertEqual(height, full, "one height for every page")
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, 1, "never replaced")
         vc.viewWillDisappear(false)
     }
 
@@ -337,24 +337,22 @@ final class KeyboardViewControllerTests: XCTestCase {
                        "four rows in 241 pt keep the full key height")
     }
 
-    /// iOS laid the keyboard out at another height after it appeared: the height is requested again, a
-    /// bounded number of times (iOS and the keyboard must not resize each other forever).
-    func testAHeightIOSChangedIsRequestedAgainAFewTimes() {
+    /// The system kept another height after the keyboard appeared: new constraints a few times, a
+    /// moment later each.
+    func testAHeightIOSKeptIsRequestedAgainAFewTimes() {
         KeyboardLog.shared.clear()
         start()
         let wanted = height
-        for _ in 0..<10 {
+        let before = vc.view.heightAnchor.testConstraints.count
+        for _ in 0..<6 {
             vc.view.frame = CGRect(x: 0, y: 0, width: 440, height: 241)
             vc.viewDidLayoutSubviews()
-            vc.view.frame = CGRect(x: 0, y: 0, width: 440, height: 240)
-            vc.viewDidLayoutSubviews()
         }
-        wait(0.7)
+        wait(0.8)
+        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, before + 3, "three new requests, then it gives up")
         XCTAssertEqual(height, wanted)
-        XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, 1)
         KeyboardLog.shared.flush()
-        let log = KeyboardLog.shared.read()
-        XCTAssertEqual(log.components(separatedBy: "requesting it again").count - 1, 6, log)
+        XCTAssertEqual(KeyboardLog.shared.read().components(separatedBy: "asking again").count - 1, 3)
         vc.viewWillDisappear(false)
     }
 
