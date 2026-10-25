@@ -218,15 +218,20 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(subview(SuggestionBarView.self)?.frame.minX, 47)
     }
 
-    func testTheSuggestionBarIsLowAndItsWordsSitAboveItsMiddle() {
+    /// iOS shows its 17 pt glass strip above the keyboard in some places and not in others: the words sit
+    /// between the place centred with it (14.5 pt, 1.0.8–1.0.20) and the one centred without it (23 pt).
+    func testTheSuggestionWordsSitBetweenThePlacesForWithAndWithoutIOSsStrip() {
         start()
         vc.viewDidLayoutSubviews()
         let bar = subview(SuggestionBarView.self)
         XCTAssertEqual(bar?.frame.height, 36)
         XCTAssertEqual(keyboard.frame.minY, 36)
         bar?.layoutIfNeeded()
-        let word = bar?.subviews.compactMap { $0 as? UIButton }.first
-        XCTAssertEqual(word?.frame.midY ?? 0, 18 - SuggestionBarView.textRaise, accuracy: 0.01)
+        let words = bar?.subviews.compactMap { $0 as? UIButton } ?? []
+        XCTAssertFalse(words.isEmpty)
+        for word in words {
+            XCTAssertEqual(word.frame.midY, 20.5, accuracy: 0.01, "6 pt lower than 1.0.20: never against the top edge without the strip")
+        }
     }
 
     func testKeysTypeIntoTheDocumentWithAutoCapitalisation() {

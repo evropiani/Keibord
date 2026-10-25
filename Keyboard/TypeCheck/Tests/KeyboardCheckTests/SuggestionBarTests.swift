@@ -38,6 +38,21 @@ final class SuggestionBarTests: XCTestCase {
         XCTAssertEqual(recorder.selected, ["to", "to", "the", "you"])
     }
 
+    func testTheAutocorrectHighlightStaysInsideTheBar() {
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 36))
+        bar = SuggestionBarView(frame: CGRect(x: 0, y: 0, width: 390, height: 36))
+        container.addSubview(bar)
+        bar.update([Suggestion(text: "the", kind: .correction, isAutocorrect: true), Suggestion(text: "then", kind: .prediction)],
+                   theme: KeyboardTheme(settings: KeibordSettings(), dark: false))
+        bar.layoutIfNeeded()
+        let highlight = bar.subviews.first { !($0 is UIButton) && !$0.isHidden && $0.frame.width > 10 }
+        XCTAssertNotNil(highlight)
+        XCTAssertGreaterThanOrEqual(highlight?.frame.minY ?? -1, 0)
+        XCTAssertLessThanOrEqual(highlight?.frame.maxY ?? 99, 36)
+        let word = bar.subviews.compactMap { $0 as? UIButton }.first
+        XCTAssertEqual(highlight?.frame.midY ?? 0, word?.frame.midY ?? -1, accuracy: 0.01, "centred on its word")
+    }
+
     func testEmptySlotsDoNothingAndTheSlotUnderTheLiftedFingerCounts() {
         setUpBar(["ok", "okay"])
         tap(300) // the third slot is empty

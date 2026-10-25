@@ -1,7 +1,7 @@
-Keibord 1.0.20: the suggestions sit in the same place every time.
+Keibord 1.0.21: the suggestions no longer sit against the top edge in apps.
 
-- iOS draws a thin glass strip (17 pt) above third-party keyboards, and the suggestion bar was laid out for it (the words sit a little above the bar's middle, so they look centred between that strip and the keys). Now and then the strip was missing, and the words then sat right against the top edge.
-- It went missing when the keyboard asked for its height again while already on screen: iOS then laid it out anew, sometimes without the strip. Keibord did that on every opening (a leftover from the height fixes), when a field wanted a number pad, and for the emoji search (52 pt taller).
-- Now the keyboard sets its height once while it loads and never changes it on screen. Number pads use the same height (with taller keys), and the emoji search takes the room for its search bar from the keys instead of making the keyboard taller.
+- iOS draws a thin glass strip (17 pt) above third-party keyboards, but not everywhere: it is always there in Spotlight and the App Library, while apps start without it and only get it after switching apps (or after Apple's own keyboard, for example in a password field). Other keyboard developers have reported the same to Apple. A keyboard cannot tell whether the strip is there.
+- Since 1.0.8 the suggestions were placed for the strip, so in apps without it they sat right against the top edge. They now sit 6 pt lower, between the two cases: a little high without the strip, a little low with it, and never against the edge.
+- 1.0.20 blamed height changes for the missing strip; that was wrong (the strip comes and goes by itself). Its changes stay: the keyboard keeps one height on every page.
 
 Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboard), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.

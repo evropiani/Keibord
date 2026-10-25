@@ -86,25 +86,28 @@ final class SuggestionBarView: UIView {
         setNeedsLayout()
     }
 
-    /// The words sit this much above the bar's middle: iOS 26/27 usually draws a 17 pt glass band above
-    /// the keyboard (above the bar), while the gap to the first key row below it is smaller, so a centred
-    /// word looked too low. iOS leaves the band out by itself now and then (after its Emoji keyboard, and
-    /// in fresh sessions until the next app switch; Apple developer forums thread 843093, any third-party
-    /// keyboard), and the words then sit high. The keyboard's view, window and safe area are the same
-    /// either way, so it cannot tell, and no single position looks centred in both cases.
-    static let textRaise: CGFloat = 3.5
+    /// The words' middle sits this far below the bar's middle. iOS 26/27 draws a 17 pt glass strip above
+    /// third-party keyboards in some places (Spotlight, the App Library, apps after switching) and leaves
+    /// it out in others (apps at first), and the keyboard cannot tell which: its view, window and safe area
+    /// are the same either way (Apple developer forums thread 843093). No single position is centred in
+    /// both cases, so the words sit between the two: a little high without the strip, a little low with
+    /// it, never against the top edge. (1.0.8–1.0.20 placed them for the strip, 3.5 pt above the middle,
+    /// and in apps without it they sat against the edge.)
+    static let textOffset: CGFloat = 2.5
 
     override func layoutSubviews() {
         super.layoutSubviews()
         let count = max(items.count, 1)
         let w = bounds.width / CGFloat(count == 1 ? 1 : 3)
-        let textHeight = max(0, bounds.height - 2 * Self.textRaise)
+        // 29 pt in the 36 pt bar, so the autocorrect highlight (2 pt inside it) stays inside the bar.
+        let textHeight = max(0, bounds.height - 7)
+        let textTop = (bounds.height - textHeight) / 2 + Self.textOffset
         for (i, b) in buttons.enumerated() {
             let x: CGFloat = count == 1 ? 0 : CGFloat(i) * w
-            b.frame = CGRect(x: x + 4, y: 0, width: (count == 1 ? bounds.width : w) - 8, height: textHeight)
+            b.frame = CGRect(x: x + 4, y: textTop, width: (count == 1 ? bounds.width : w) - 8, height: textHeight)
         }
         for (i, s) in separators.enumerated() {
-            s.frame = CGRect(x: CGFloat(i + 1) * w, y: textHeight * 0.25, width: 1 / max(traitCollection.displayScale, 1), height: textHeight * 0.5)
+            s.frame = CGRect(x: CGFloat(i + 1) * w, y: textTop + textHeight * 0.25, width: 1 / max(traitCollection.displayScale, 1), height: textHeight * 0.5)
         }
         if let index = items.firstIndex(where: { $0.isAutocorrect }), index < buttons.count {
             highlight.frame = buttons[index].frame.insetBy(dx: -2, dy: 2)

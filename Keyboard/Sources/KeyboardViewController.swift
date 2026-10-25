@@ -106,10 +106,8 @@ final class KeyboardViewController: UIInputViewController {
     /// Next-letter prediction for the current word (recomputed when the word or the languages change).
     private var cachedLetterPrior: (key: String, prior: [String: Double])?
 
-    /// Suggestion bar: kept low, because iOS 26/27 usually draws a 17 pt glass band above the keyboard's
-    /// view (the words sit 3.5 pt above the bar's middle, `SuggestionBarView.textRaise`, to look centred
-    /// between that band's top edge and the keys). iOS leaves the band out by itself now and then, which
-    /// the keyboard cannot see (see `textRaise`).
+    /// Suggestion bar: kept low, because iOS 26/27 draws a 17 pt glass strip above the keyboard's view in
+    /// some places and not in others, which the keyboard cannot see (see `SuggestionBarView.textOffset`).
     private static let barHeight: CGFloat = 36
     /// Emoji search: query field and result row (shown instead of the suggestion bar).
     private static let searchBarHeight: CGFloat = 88
