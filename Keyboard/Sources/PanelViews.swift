@@ -86,8 +86,9 @@ final class SuggestionBarView: UIView {
         setNeedsLayout()
     }
 
-    /// The words sit this much above the bar's middle: iOS pads the keyboard above the bar, while the
-    /// gap to the first key row below it is smaller, so a centred word looked too low.
+    /// The words sit this much above the bar's middle: iOS draws a 17 pt glass band above the keyboard
+    /// (above the bar), while the gap to the first key row below it is smaller, so a centred word looked
+    /// too low. Relies on that band, which the keyboard keeps by never changing its height on screen.
     static let textRaise: CGFloat = 3.5
 
     override func layoutSubviews() {

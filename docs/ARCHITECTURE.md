@@ -477,8 +477,13 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   variants without `allowsSelfSizing` got 241/224 pt everywhere, with or without a required
   constraint, `preferredContentSize` or +1 pt changes): `inputView.allowsSelfSizing = true`, the
   requested height on `view` and on an invisible sizer pinned to its edges (both priority 999), set
-  in viewDidLoad (after rendering, so it is the full height), replaced by new constraints in
-  viewDidAppear and again (≤ 3 times, 0.1 s·n later) while the system keeps another height. Confirmed
+  once in viewDidLoad (after rendering, so it is the full height) and requested again only while the
+  system keeps another height (≤ 3 times, 0.1 s·n later). The height never changes while the keyboard
+  is on screen: one height per orientation and settings for every page, field and mode (number pads
+  stretch their rows, the emoji search takes its 88 pt bar from the keys), no re-request in
+  viewDidAppear. Changing it on screen made iOS lay the keyboard out again, now and then without the
+  17 pt glass band it draws above it; the suggestion bar's text position (`textRaise`) assumes the
+  band. The 1.5 s self-check logs where the view sits in its window ("settled: …"). Confirmed
   on an iPhone (iOS 27): with `allowsSelfSizing` the keyboard got its full height in every app at once
   (no restart needed); never remove it. Keys are drawn in viewDidLoad but the view stays invisible
   (alpha 0) until prepareForAppearance knows the host's light/dark appearance (a guess flashed the

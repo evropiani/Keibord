@@ -106,7 +106,10 @@ final class KeyboardViewController: UIInputViewController {
     /// Next-letter prediction for the current word (recomputed when the word or the languages change).
     private var cachedLetterPrior: (key: String, prior: [String: Double])?
 
-    /// Suggestion bar: kept low, iOS already pads the keyboard above it.
+    /// Suggestion bar: kept low, because iOS 26/27 draws a 17 pt glass band above the keyboard's view
+    /// (the words sit 3.5 pt above the bar's middle, `SuggestionBarView.textRaise`, to look centred
+    /// between that band's top edge and the keys). The band went missing when the keyboard's height
+    /// changed while it was on screen, so the height never changes then (see viewDidAppear, render).
     private static let barHeight: CGFloat = 36
     /// Emoji search: query field and result row (shown instead of the suggestion bar).
     private static let searchBarHeight: CGFloat = 88
@@ -232,11 +235,22 @@ final class KeyboardViewController: UIInputViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self = self, self.appeared, self.appearanceCount == appearance else { return }
                 self.ensureKeysAreShown()
-                if index == Self.recheckDelays.count - 1, abs(self.view.bounds.height - self.requestedHeight) > 1 {
-                    KeyboardLog.shared.add("iOS keeps height \(Int(self.view.bounds.height)) instead of \(Int(self.requestedHeight))")
-                }
+                if index == Self.recheckDelays.count - 1 { self.logSettledGeometry() }
             }
         }
+    }
+
+    /// Where the keyboard's view ended up in its window once iOS is done (whether iOS's glass band above
+    /// the keys lies inside the keyboard's own window shows here), and whether iOS kept another height.
+    private func logSettledGeometry() {
+        let window = view.window
+        let top = window.map { view.convert(CGPoint.zero, to: $0).y } ?? 0
+        var line = "settled: view \(Self.sizeText(view.bounds.size)) at y \(Int(top)) in window \(Self.sizeText(window?.bounds.size ?? .zero)), "
+            + "safe area top \(Int(view.safeAreaInsets.top))"
+        if abs(view.bounds.height - requestedHeight) > 1 {
+            line += ", iOS keeps height \(Int(view.bounds.height)) instead of \(Int(requestedHeight))"
+        }
+        KeyboardLog.shared.add(line)
     }
 
     private func ensureKeysAreShown() {
@@ -262,7 +276,8 @@ final class KeyboardViewController: UIInputViewController {
         fullAccess = hasFullAccess
         appearanceCount += 1
         heightRetries = 0
-        inputView?.allowsSelfSizing = true
+        // Set only when it is off: setting it may make iOS measure the keyboard again (see viewDidAppear).
+        if inputView?.allowsSelfSizing == false { inputView?.allowsSelfSizing = true }
         // Before reloading: a settings change renders right away (controller delegate), which must not
         // configure the emoji panel (loading the emoji catalog) the keyboard was dismissed in.
         mode = .keys
@@ -303,11 +318,13 @@ final class KeyboardViewController: UIInputViewController {
             prepareForAppearance()
         }
         disableSystemTouchDelays()
-        // A keyboard can only change its height once it has been drawn on screen: ask again now (and
-        // again if the system still keeps another height). Should the height still fall short, the row
-        // gaps and then the keys shrink to fit (KeyboardView).
+        // The height set while loading is already applied here (log: "size 440×314" comes before
+        // "on screen"). It is not asked for again: every new request made once the keyboard is on screen
+        // made iOS lay it out again, now and then without the 17 pt glass band it draws above it, and
+        // the suggestions then sat against the top edge. Only a height iOS did not apply is asked for
+        // again (requestHeightAgainIfIgnored). Should it still fall short, the row gaps and then the
+        // keys shrink to fit (KeyboardView).
         appeared = true
-        installHeightConstraint()
         KeyboardLog.shared.add("on screen: view \(Self.sizeText(view.bounds.size)), window \(Self.sizeText(view.window?.bounds.size ?? .zero))")
         checkAfterAppearing()
     }
@@ -690,10 +707,12 @@ final class KeyboardViewController: UIInputViewController {
             returnKind: searching ? .default : field.returnKind
         )
         let layout = self.layout(for: request)
-        let isPad = request.variant == .numberPad || request.variant == .decimalPad
-        let rows = max(layout.rows.count, isPad ? 4 : (numberRow ? 5 : 4))
-        let keysHeight = baseMetrics.keyboardHeight(rows: rows)
-        let total = (searching ? Self.searchBarHeight : Self.barHeight) + keysHeight
+        // One height for every page, field and mode (letters, numbers, number pads, the emoji panel and
+        // its search): a height change while the keyboard is on screen made iOS lay it out again, now
+        // and then without the glass band above it (see viewDidAppear). Pages with fewer rows stretch
+        // theirs; the emoji search takes its query bar's room from the keys.
+        let rows = max(layout.rows.count, settings.appearance.showNumberRow ? 5 : 4)
+        let total = Self.barHeight + baseMetrics.keyboardHeight(rows: rows)
         requestedHeight = total
         if heightConstraint?.constant != total { heightConstraint?.constant = total }
         if sizerHeightConstraint?.constant != total { sizerHeightConstraint?.constant = total }
@@ -709,7 +728,8 @@ final class KeyboardViewController: UIInputViewController {
             // While searching emoji, keys type into the query: no trackpad, and letters arrive lower-case.
             keyboardView.spacebarCursor = settings.spacebarCursor && !searching
             keyboardView.letterPrior = letterPrior(for: request.page)
-            keyboardView.configure(layout: layout, metrics: Self.metrics(baseMetrics, rows: layout.rows.count, filling: rows),
+            // While searching, the keys fit below the query bar unstretched (KeyboardView fits them).
+            keyboardView.configure(layout: layout, metrics: Self.metrics(baseMetrics, rows: layout.rows.count, filling: searching ? layout.rows.count : rows),
                                    theme: theme, shiftState: searching ? .off : controller.shiftState,
                                    spaceLabel: spaceLabel, returnEnabled: searching || !(field.enablesReturnKeyAutomatically && empty),
                                    returnProminent: request.returnKind.isProminent,

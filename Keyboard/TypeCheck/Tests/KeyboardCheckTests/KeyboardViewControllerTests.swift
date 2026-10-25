@@ -148,10 +148,10 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertTrue(vc.view.backgroundColor === UIColor.touchableClear, "dark theme on the dark backdrop: the system's glass")
     }
 
-    /// The height as versions 1.0.3–1.0.13 asked for it, the only ones iOS 27 gave the full height: a
-    /// self-sizing input view, the full height on the view and on a sizer pinned to its edges while the
-    /// keyboard loads, and new constraints once it is on screen.
-    func testTheHeightIsRequestedWhileLoadingAndAgainOnScreen() {
+    /// The height as iOS 27 gives it: a self-sizing input view with the full height on the view and on a
+    /// sizer pinned to its edges while the keyboard loads. Not asked for again once it is on screen:
+    /// that made iOS lay the keyboard out again without the glass band above it.
+    func testTheHeightIsRequestedWhileLoadingOnly() {
         var settings = KeibordSettings()
         settings.appearance.showNumberRow = true
         KeibordStore.shared.saveSettings(settings)
@@ -169,14 +169,43 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertNotNil(keyView("a"), "keys before the keyboard appears")
         vc.viewWillAppear(false)
         vc.viewDidAppear(false)
-        let again = vc.view.heightAnchor.testConstraints.last
-        XCTAssertFalse(first === again, "a new constraint asks the system again")
-        XCTAssertEqual(first?.isActive, false)
-        XCTAssertEqual(again?.isActive, true)
-        XCTAssertEqual(again?.constant, full)
-        send(.switchPage(.numbers))
-        XCTAssertEqual(height, full, "one height for every page")
+        wait(0.6)
+        XCTAssertTrue(vc.view.heightAnchor.testConstraints.last === first, "no new request once on screen")
+        XCTAssertEqual(first?.isActive, true)
+        XCTAssertEqual(first?.constant, full)
         vc.viewWillDisappear(false)
+    }
+
+    /// Every page, field and mode keeps the height the keyboard opened with: a change while it is on
+    /// screen made iOS drop the glass band above it, and the suggestions sat against the top edge.
+    func testTheHeightNeverChangesWhileOnScreen() {
+        for numberRow in [true, false] {
+            var settings = KeibordSettings()
+            settings.appearance.showNumberRow = numberRow
+            start(settings: settings)
+            let constraints = vc.view.heightAnchor.testConstraints.count
+            let full = height
+            XCTAssertEqual(full, 36 + KeyboardMetrics.standard(height: .standard, landscape: false).keyboardHeight(rows: numberRow ? 5 : 4))
+            func check(_ step: String) {
+                XCTAssertEqual(height, full, "\(step) (number row \(numberRow))")
+                XCTAssertEqual(vc.view.heightAnchor.testConstraints.count, constraints, "\(step): no new request")
+            }
+            send(.switchPage(.numbers)); check("numbers")
+            send(.switchPage(.symbols)); check("symbols")
+            send(.switchPage(.letters)); check("letters")
+            proxy.keyboardType = .numberPad
+            vc.textDidChange(nil); check("number pad field")
+            proxy.keyboardType = .default
+            vc.textDidChange(nil); check("text field again")
+            send(.emoji); check("emoji panel")
+            let panel = subview(EmojiPanelView.self)!
+            vc.emojiPanelDidRequestSearch(panel); check("emoji search")
+            vc.viewDidLayoutSubviews()
+            XCTAssertLessThanOrEqual(keyboard.frame.maxY, vc.view.bounds.height + 0.5, "the keys fit below the query bar")
+            vc.emojiSearchBarDidCancel(subview(EmojiSearchBarView.self)!); check("search cancelled")
+            vc.emojiPanelDidTapABC(panel); check("back to the keys")
+            vc.viewWillDisappear(false)
+        }
     }
 
     func testKeysStayInsideTheSafeAreaInLandscape() {
@@ -685,7 +714,7 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertTrue(keyboard.isHidden)
         vc.emojiPanelDidRequestSearch(panel!)
         let bar = subview(EmojiSearchBarView.self)
-        XCTAssertEqual(height, keysHeight + 52, "the 88 pt query bar replaces the 36 pt suggestion bar")
+        XCTAssertEqual(height, keysHeight, "one height: the 88 pt query bar takes its room from the keys")
         XCTAssertFalse(keyboard.isHidden)
         type("he")
         XCTAssertEqual(proxy.text, "X")
