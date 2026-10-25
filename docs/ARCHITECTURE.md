@@ -481,9 +481,12 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   system keeps another height (≤ 3 times, 0.1 s·n later). The height never changes while the keyboard
   is on screen: one height per orientation and settings for every page, field and mode (number pads
   stretch their rows, the emoji search takes its 88 pt bar from the keys), no re-request in
-  viewDidAppear. Changing it on screen made iOS lay the keyboard out again, now and then without the
-  17 pt glass band it draws above it; the suggestion bar's text position (`textRaise`) assumes the
-  band. The 1.5 s self-check logs where the view sits in its window ("settled: …"). Confirmed
+  viewDidAppear. iOS 26/27 draws a 17 pt glass band above third-party keyboards, host-side, and adds
+  or drops it by itself (present after Apple's English keyboard or an app switch, missing after
+  Apple's Emoji keyboard and in fresh sessions until the next app switch; Apple developer forums
+  thread 843093). The keyboard's view, window and safe area are identical either way, so it cannot
+  tell; the suggestion bar's text position (`textRaise`) is centred for the band, the usual case.
+  The 1.5 s self-check logs where the view sits in its window ("settled: …"). Confirmed
   on an iPhone (iOS 27): with `allowsSelfSizing` the keyboard got its full height in every app at once
   (no restart needed); never remove it. Keys are drawn in viewDidLoad but the view stays invisible
   (alpha 0) until prepareForAppearance knows the host's light/dark appearance (a guess flashed the

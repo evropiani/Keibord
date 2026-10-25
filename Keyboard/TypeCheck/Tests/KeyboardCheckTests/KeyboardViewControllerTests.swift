@@ -149,8 +149,7 @@ final class KeyboardViewControllerTests: XCTestCase {
     }
 
     /// The height as iOS 27 gives it: a self-sizing input view with the full height on the view and on a
-    /// sizer pinned to its edges while the keyboard loads. Not asked for again once it is on screen:
-    /// that made iOS lay the keyboard out again without the glass band above it.
+    /// sizer pinned to its edges while the keyboard loads. Not asked for again once it is on screen.
     func testTheHeightIsRequestedWhileLoadingOnly() {
         var settings = KeibordSettings()
         settings.appearance.showNumberRow = true
@@ -176,8 +175,8 @@ final class KeyboardViewControllerTests: XCTestCase {
         vc.viewWillDisappear(false)
     }
 
-    /// Every page, field and mode keeps the height the keyboard opened with: a change while it is on
-    /// screen made iOS drop the glass band above it, and the suggestions sat against the top edge.
+    /// Every page, field and mode keeps the height the keyboard opened with, so it never changes height
+    /// on screen.
     func testTheHeightNeverChangesWhileOnScreen() {
         for numberRow in [true, false] {
             var settings = KeibordSettings()

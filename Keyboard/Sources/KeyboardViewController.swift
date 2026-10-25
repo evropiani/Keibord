@@ -106,10 +106,10 @@ final class KeyboardViewController: UIInputViewController {
     /// Next-letter prediction for the current word (recomputed when the word or the languages change).
     private var cachedLetterPrior: (key: String, prior: [String: Double])?
 
-    /// Suggestion bar: kept low, because iOS 26/27 draws a 17 pt glass band above the keyboard's view
-    /// (the words sit 3.5 pt above the bar's middle, `SuggestionBarView.textRaise`, to look centred
-    /// between that band's top edge and the keys). The band went missing when the keyboard's height
-    /// changed while it was on screen, so the height never changes then (see viewDidAppear, render).
+    /// Suggestion bar: kept low, because iOS 26/27 usually draws a 17 pt glass band above the keyboard's
+    /// view (the words sit 3.5 pt above the bar's middle, `SuggestionBarView.textRaise`, to look centred
+    /// between that band's top edge and the keys). iOS leaves the band out by itself now and then, which
+    /// the keyboard cannot see (see `textRaise`).
     private static let barHeight: CGFloat = 36
     /// Emoji search: query field and result row (shown instead of the suggestion bar).
     private static let searchBarHeight: CGFloat = 88
@@ -240,8 +240,8 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    /// Where the keyboard's view ended up in its window once iOS is done (whether iOS's glass band above
-    /// the keys lies inside the keyboard's own window shows here), and whether iOS kept another height.
+    /// Where the keyboard's view ended up in its window once iOS is done, and whether iOS kept another
+    /// height. (iOS's glass band above the keys never shows here: it lies outside the keyboard's window.)
     private func logSettledGeometry() {
         let window = view.window
         let top = window.map { view.convert(CGPoint.zero, to: $0).y } ?? 0
@@ -319,11 +319,9 @@ final class KeyboardViewController: UIInputViewController {
         }
         disableSystemTouchDelays()
         // The height set while loading is already applied here (log: "size 440×314" comes before
-        // "on screen"). It is not asked for again: every new request made once the keyboard is on screen
-        // made iOS lay it out again, now and then without the 17 pt glass band it draws above it, and
-        // the suggestions then sat against the top edge. Only a height iOS did not apply is asked for
-        // again (requestHeightAgainIfIgnored). Should it still fall short, the row gaps and then the
-        // keys shrink to fit (KeyboardView).
+        // "on screen"), so it is not asked for again; only a height iOS did not apply is
+        // (requestHeightAgainIfIgnored). Should it still fall short, the row gaps and then the keys
+        // shrink to fit (KeyboardView).
         appeared = true
         KeyboardLog.shared.add("on screen: view \(Self.sizeText(view.bounds.size)), window \(Self.sizeText(view.window?.bounds.size ?? .zero))")
         checkAfterAppearing()
@@ -708,8 +706,7 @@ final class KeyboardViewController: UIInputViewController {
         )
         let layout = self.layout(for: request)
         // One height for every page, field and mode (letters, numbers, number pads, the emoji panel and
-        // its search): a height change while the keyboard is on screen made iOS lay it out again, now
-        // and then without the glass band above it (see viewDidAppear). Pages with fewer rows stretch
+        // its search), so the keyboard never changes height on screen. Pages with fewer rows stretch
         // theirs; the emoji search takes its query bar's room from the keys.
         let rows = max(layout.rows.count, settings.appearance.showNumberRow ? 5 : 4)
         let total = Self.barHeight + baseMetrics.keyboardHeight(rows: rows)

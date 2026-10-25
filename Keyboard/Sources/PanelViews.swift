@@ -86,9 +86,12 @@ final class SuggestionBarView: UIView {
         setNeedsLayout()
     }
 
-    /// The words sit this much above the bar's middle: iOS draws a 17 pt glass band above the keyboard
-    /// (above the bar), while the gap to the first key row below it is smaller, so a centred word looked
-    /// too low. Relies on that band, which the keyboard keeps by never changing its height on screen.
+    /// The words sit this much above the bar's middle: iOS 26/27 usually draws a 17 pt glass band above
+    /// the keyboard (above the bar), while the gap to the first key row below it is smaller, so a centred
+    /// word looked too low. iOS leaves the band out by itself now and then (after its Emoji keyboard, and
+    /// in fresh sessions until the next app switch; Apple developer forums thread 843093, any third-party
+    /// keyboard), and the words then sit high. The keyboard's view, window and safe area are the same
+    /// either way, so it cannot tell, and no single position looks centred in both cases.
     static let textRaise: CGFloat = 3.5
 
     override func layoutSubviews() {
