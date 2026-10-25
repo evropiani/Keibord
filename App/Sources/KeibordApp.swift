@@ -31,6 +31,7 @@ struct KeibordApp: App {
 /// The iPhone's own light/dark setting, which the app follows explicitly. Coming back to the app, iOS
 /// sometimes left it light in dark mode, or a mix of both: it renders apps in both styles for the app
 /// switcher when they go to the background and did not always switch back.
+@MainActor
 final class SystemAppearance: ObservableObject {
     @Published private(set) var scheme: ColorScheme?
     private var registration: (any UITraitChangeRegistration)?
