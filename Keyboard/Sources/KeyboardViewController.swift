@@ -165,18 +165,24 @@ final class KeyboardViewController: UIInputViewController {
         // from the text field yet (see `proxyConnected`): the field is configured when it appears.
         render()
         installHeightConstraint()
+        // Invisible until iOS connects the text field: before that the keyboard cannot know whether the
+        // app wants it light or dark, and a guess flashed the wrong colours for a moment.
+        view.alpha = 0
         KeyboardLog.shared.add(String(format: "loaded in %.0f ms", Date().timeIntervalSince(loadStart) * 1000)
                                + ", height wanted \(Int(requestedHeight))" + (inputView == nil ? " (no input view)" : ""))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.checkShownAfterLoading() }
+        for delay in [1.0, 2.0, 4.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.checkShownAfterLoading(delay) }
+        }
     }
 
-    /// iOS loaded a keyboard and then never showed it (no viewWillAppear/viewDidAppear): it stayed
-    /// blank or collapsed until it was opened again. Logged, and prepared anyway if it is on screen.
-    private func checkShownAfterLoading() {
-        guard !preparedForAppearance, !appeared else { return }
+    /// iOS loaded a keyboard and then never announced it (no viewWillAppear/viewDidAppear): it stayed
+    /// blank or collapsed until it was opened again. Logged; once it is in a window, the keys drawn
+    /// while loading are shown (nothing is read from the text field, which iOS has not connected).
+    private func checkShownAfterLoading(_ seconds: TimeInterval) {
+        guard !preparedForAppearance, !appeared, view.alpha == 0 else { return }
         let inWindow = view.window != nil
-        KeyboardLog.shared.add("loaded 1 s ago but not announced as shown (in a window: \(inWindow ? "yes" : "no"), view \(Self.sizeText(view.bounds.size)))")
-        if inWindow { prepareForAppearance() }
+        KeyboardLog.shared.add("loaded \(Int(seconds)) s ago but not announced as shown (in a window: \(inWindow ? "yes" : "no"), view \(Self.sizeText(view.bounds.size)))")
+        if inWindow { view.alpha = 1 }
     }
 
     deinit {
@@ -284,6 +290,7 @@ final class KeyboardViewController: UIInputViewController {
         if startsOnNumbersPage { controller.handle(.switchPage(.numbers)) }
         writeState()
         render()
+        view.alpha = 1
         scheduleEngineRefresh()
         KeyboardLog.shared.add("appear: \(controller.field.kind) field, full access \(fullAccess ? "on" : "off"), view \(Self.sizeText(view.bounds.size)), "
                                + "height wanted \(Int(requestedHeight)), memory \(KeyboardDiagnostics.memoryDescription)")

@@ -497,6 +497,27 @@ final class KeyboardViewControllerTests: XCTestCase {
         KeyboardLog.shared.flush()
         XCTAssertTrue(KeyboardLog.shared.read().contains("not announced as shown"))
         XCTAssertNotNil(keyView("a"))
+        XCTAssertFalse(proxy.identifierReadWhileDisconnected, "the fallback reads nothing from the text field")
+    }
+
+    /// Before iOS connects the text field the keyboard cannot know whether the app wants it light or
+    /// dark: it stays invisible until then instead of flashing a guess.
+    func testTheKeyboardIsInvisibleUntilItsAppearanceIsKnown() {
+        UIScreen.main.testUserInterfaceStyle = .dark
+        proxy = TestProxy()
+        proxy.connected = false
+        vc = KeyboardViewController()
+        vc.testProxy = proxy
+        vc.testTraitCollection = UITraitCollection(testStyle: .dark)
+        vc.viewDidLoad()
+        XCTAssertEqual(vc.view.alpha, 0)
+        XCTAssertNotNil(keyView("a"), "keys and height are ready")
+        proxy.connected = true
+        vc.viewWillAppear(false)
+        XCTAssertEqual(vc.view.alpha, 1)
+        vc.viewDidAppear(false)
+        vc.viewWillDisappear(false)
+        UIScreen.main.testUserInterfaceStyle = .light
     }
 
     func testTheKeyboardLogRecordsOpeningAndClosingButNoTypedText() {

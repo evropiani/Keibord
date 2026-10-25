@@ -480,7 +480,10 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   in viewDidLoad (after rendering, so it is the full height), replaced by new constraints in
   viewDidAppear and again (≤ 3 times, 0.1 s·n later) while the system keeps another height. Confirmed
   on an iPhone (iOS 27): with `allowsSelfSizing` the keyboard got its full height in every app at once
-  (no restart needed); never remove it. Keys are drawn in viewDidLoad; the self-checks 0.5 s/1.5 s after appearing
+  (no restart needed); never remove it. Keys are drawn in viewDidLoad but the view stays invisible
+  (alpha 0) until prepareForAppearance knows the host's light/dark appearance (a guess flashed the
+  wrong colours); a keyboard never announced as shown is revealed by the 1/2/4 s fallback once it is
+  in a window, without reading the text field; the self-checks 0.5 s/1.5 s after appearing
   render again when no keys are drawn and log the height iOS kept; 1 s after loading, a keyboard never
   announced as shown is logged and prepared if it is in a window. Should the view outgrow its window,
   the keys are laid out in the visible part. The number row follows the setting only. In a lower key
@@ -574,6 +577,10 @@ SwiftUI, `NavigationStack` + `List`. Tabs: **Keyboard** (home), **Settings**, **
   password), import (UIKit `UIDocumentPickerViewController` as a copy – SwiftUI's `.fileImporter` can ignore
   taps on a real iPhone; any file can be picked, the content decides; password prompt if encrypted; the dialog names the file's parts and
   only those change; merge or replace for typing data), reset learned data, reset everything. Diagnostics.
+* App appearance: the app pins `preferredColorScheme` to the iPhone's setting
+  (`UIScreen.main.traitCollection`, updated on activation and by a window-scene trait registration):
+  iOS renders backgrounded apps in both styles for the app switcher and sometimes left the app light in
+  dark mode or mixed. The keyboard previews start in the current style.
 * App UI language: English.
 
 ## 12. Work packages & ownership

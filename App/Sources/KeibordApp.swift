@@ -4,15 +4,18 @@ import KeibordCore
 @main
 struct KeibordApp: App {
     @StateObject private var model = AppModel()
+    @StateObject private var appearance = SystemAppearance()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(model)
+                .preferredColorScheme(appearance.scheme)
                 .onChange(of: scenePhase) { phase in
                     switch phase {
                     case .active:
+                        appearance.update()
                         model.refresh()
                     case .inactive, .background:
                         // The keyboard reads the files when it appears: never leave edits unsaved.
@@ -21,6 +24,32 @@ struct KeibordApp: App {
                         break
                     }
                 }
+        }
+    }
+}
+
+/// The iPhone's own light/dark setting, which the app follows explicitly. Coming back to the app, iOS
+/// sometimes left it light in dark mode, or a mix of both: it renders apps in both styles for the app
+/// switcher when they go to the background and did not always switch back.
+final class SystemAppearance: ObservableObject {
+    @Published private(set) var scheme: ColorScheme?
+    private var registration: (any UITraitChangeRegistration)?
+
+    func update() {
+        // The screen's traits are the iPhone's setting; the app's own traits are what went wrong.
+        let style = UIScreen.main.traitCollection.userInterfaceStyle
+        let current: ColorScheme? = style == .dark ? .dark : (style == .light ? .light : nil)
+        if current != scheme { scheme = current }
+        observeChanges()
+    }
+
+    /// The iPhone switching between light and dark while the app is open (automatic appearance,
+    /// Control Center): the window scene's traits follow the iPhone, not the app's override.
+    private func observeChanges() {
+        guard registration == nil,
+              let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+        registration = scene.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
+            self?.update()
         }
     }
 }

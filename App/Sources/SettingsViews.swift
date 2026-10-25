@@ -163,6 +163,8 @@ struct LanguageDetailView: View {
 
 struct AppearanceView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    /// Follows the iPhone's style (it always started light, which looked broken in dark mode).
     @State private var previewDark = false
 
     private func colorBinding(dark: Bool, _ keyPath: WritableKeyPath<KeyColorScheme, RGBAColor>) -> Binding<Color> {
@@ -251,6 +253,8 @@ struct AppearanceView: View {
             }
         }
         .navigationTitle("Theme & Keys")
+        .onAppear { previewDark = colorScheme == .dark }
+        .onChange(of: colorScheme) { previewDark = $0 == .dark }
     }
 }
 
@@ -261,6 +265,7 @@ struct TintedKeysView: View {
     @State private var selection: Set<String> = []
     @State private var color: Color = .blue
     @State private var page: LayoutPage = .letters
+    @Environment(\.colorScheme) private var colorScheme
     @State private var previewDark = false
 
     var body: some View {
@@ -309,6 +314,8 @@ struct TintedKeysView: View {
             }
         }
         .navigationTitle("Tinted Keys")
+        .onAppear { previewDark = colorScheme == .dark }
+        .onChange(of: colorScheme) { previewDark = $0 == .dark }
     }
 
     private func displayName(_ id: String) -> String {
