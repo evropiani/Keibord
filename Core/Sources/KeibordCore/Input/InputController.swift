@@ -25,13 +25,19 @@ public final class InputController {
     public weak var learningSink: LearningSink?
     public var settings: KeibordSettings {
         didSet {
-            if !settings.activeLanguages.contains(language) {
-                language = settings.activeLanguages[0]
+            let resolved = family?.language(enabled: settings.activeLanguages)
+                ?? (settings.activeLanguages.contains(language) ? language : settings.activeLanguages[0])
+            if resolved != language {
+                language = resolved
                 emit(.switchedLanguage(language), force: true)
             }
             update()
         }
     }
+    /// The keyboard of one language (one iOS keyboard per language, `KeyboardLanguageFamily`): it types
+    /// that language whatever is enabled in the app, which only picks its variant and the other languages
+    /// of multilingual typing. `nil`: one keyboard that switches between the enabled languages.
+    public let family: KeyboardLanguageFamily?
     public private(set) var field: FieldContext = .plain
     public private(set) var language: KeyboardLanguage
     public private(set) var shiftState: ShiftState = .off
@@ -61,13 +67,15 @@ public final class InputController {
     /// A closing single quote that becomes an apostrophe if a letter follows directly ("‚er geht‘" + s → "geht’s").
     private var pendingApostrophe: (quote: String, apostrophe: String, taps: [TapInput])?
 
-    public init(document: TextDocumentProxyLike, engine: SuggestionProviding, settings: KeibordSettings, language: KeyboardLanguage? = nil, clock: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 }) {
+    public init(document: TextDocumentProxyLike, engine: SuggestionProviding, settings: KeibordSettings, language: KeyboardLanguage? = nil,
+                family: KeyboardLanguageFamily? = nil, clock: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 }) {
         self.document = document
         self.engine = engine
         self.settings = settings
+        self.family = family
         self.clock = clock
         let langs = settings.activeLanguages
-        self.language = language.flatMap { langs.contains($0) ? $0 : nil } ?? langs[0]
+        self.language = family?.language(enabled: langs) ?? language.flatMap { langs.contains($0) ? $0 : nil } ?? langs[0]
         updateAutoShift()
         refreshSuggestions()
     }
@@ -79,10 +87,12 @@ public final class InputController {
     public var currentWord: String { composing(context).word }
 
     /// Languages used for suggestions: the current language first, then the other enabled ones (in
-    /// settings order) when multilingual typing is on.
+    /// settings order) when multilingual typing is on. A language keyboard leaves out the other variants
+    /// of its own language (an English keyboard set to UK English does not also suggest US spellings).
     public var languages: [KeyboardLanguage] {
         let enabled = settings.activeLanguages
         guard settings.multilingualTyping else { return [language] }
+        if family != nil { return [language] + enabled.filter { $0.family != language.family } }
         return [language] + enabled.filter { $0 != language }
     }
 
@@ -98,7 +108,8 @@ public final class InputController {
     }
 
     public func setLanguage(_ newLanguage: KeyboardLanguage) {
-        guard newLanguage != language else { return }
+        // A language keyboard keeps its language: the globe key switches to another keyboard.
+        guard family == nil, newLanguage != language else { return }
         language = newLanguage
         emit(.switchedLanguage(newLanguage), force: true)
         update()
@@ -107,7 +118,7 @@ public final class InputController {
     /// Cycles through the enabled languages.
     public func nextLanguage() {
         let langs = settings.activeLanguages
-        guard langs.count > 1 else { return }
+        guard family == nil, langs.count > 1 else { return }
         let i = langs.firstIndex(of: language) ?? 0
         setLanguage(langs[(i + 1) % langs.count])
     }

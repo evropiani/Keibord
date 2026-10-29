@@ -1306,6 +1306,43 @@ final class InputControllerTests: XCTestCase {
         XCTAssertEqual(sink.events.last, .switchedLanguage(.sqXK))
     }
 
+    /// One iOS keyboard per language: it types its language whatever the app enables, which picks the
+    /// variant and the other languages of multilingual typing; the language key's switching is gone.
+    func testALanguageKeyboardKeepsItsLanguage() {
+        func keyboard(_ family: KeyboardLanguageFamily, _ languages: [KeyboardLanguage], multilingual: Bool = true) {
+            doc = MockDocument()
+            engine = FakeEngine()
+            var s = settings(languages)
+            s.multilingualTyping = multilingual
+            c = InputController(document: doc, engine: engine, settings: s, language: .deAT, family: family, clock: { [unowned self] in self.now })
+            sink = Sink()
+            c.learningSink = sink
+        }
+        keyboard(.en, [.deAT, .enUS, .sqXK])
+        XCTAssertEqual(c.language, .enUS, "the variant enabled in the app, not the language remembered by another keyboard")
+        XCTAssertEqual(c.languages, [.enUS, .deAT, .sqXK])
+        c.nextLanguage()
+        c.setLanguage(.deAT)
+        XCTAssertEqual(c.language, .enUS, "no switching inside a language keyboard")
+        XCTAssertEqual(sink.events, [])
+
+        keyboard(.it, [.deAT, .enGB])
+        XCTAssertEqual(c.language, .itIT, "a keyboard whose language is not enabled in the app still types it")
+        XCTAssertEqual(c.languages, [.itIT, .deAT, .enGB])
+        XCTAssertEqual(engine.queries.last?.languages, [.itIT, .deAT, .enGB])
+
+        keyboard(.en, [.enGB, .enUS, .deAT])
+        XCTAssertEqual(c.languages, [.enGB, .deAT], "the other English variant is not suggested from too")
+        keyboard(.sq, [.deAT, .sqXK], multilingual: false)
+        XCTAssertEqual(c.languages, [.sqXK])
+
+        var s = c.settings
+        s.enabledLanguages = [.sqAL, .deAT]
+        c.settings = s
+        XCTAssertEqual(c.language, .sqAL, "the app switched the variant")
+        XCTAssertEqual(sink.events.last, .switchedLanguage(.sqAL))
+    }
+
     func testInitialLanguageMustBeEnabled() {
         make(settings([.deAT, .enGB]), language: .itIT)
         XCTAssertEqual(c.language, .deAT)

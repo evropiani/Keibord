@@ -18,7 +18,8 @@ public struct AppearanceSettings: Codable, Equatable, Sendable {
     public var themeMode: ThemeMode = .system
     /// Corner radius of keys in points.
     public var keyCornerRadius: Double = 8.5
-    public var keyShadows: Bool = true
+    /// iOS 26 keys have no shadow (settings saved before version 2 had them on by default: turned off).
+    public var keyShadows: Bool = false
     public var keyHeight: KeyHeightOption = .standard
     /// Multiplier for key label font sizes (0.8…1.3).
     public var labelScale: Double = 1.0
@@ -79,10 +80,13 @@ public struct AppearanceSettings: Codable, Equatable, Sendable {
 /// All user preferences. Written by the app, read by the keyboard (settings.json).
 /// Decoding is tolerant: unknown keys are ignored and missing keys fall back to defaults.
 public struct KeibordSettings: Codable, Equatable, Sendable {
-    public var version: Int = 1
+    /// 2 (1.0.22): key shadows off, as on iOS 26 (they were on by default before).
+    public var version: Int = KeibordSettings.currentVersion
+    public static let currentVersion = 2
 
     // MARK: Languages
-    /// Enabled languages in the order the language key cycles through them. Never empty.
+    /// Languages of multilingual typing, in order; each picks the variant of its language keyboard
+    /// (`KeyboardLanguageFamily`). Never empty.
     public var enabledLanguages: [KeyboardLanguage] = [.deAT, .enGB]
     /// Per-language base layout override (key: `KeyboardLanguage.rawValue`).
     public var layoutOverrides: [String: BaseLayout] = [:]
@@ -189,6 +193,9 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
         keySound = c.value(.keySound, default: d.keySound)
         keyPopups = c.value(.keyPopups, default: d.keyPopups)
         appearance = c.value(.appearance, default: d.appearance)
+        // Version 1 had key shadows on by default; iOS 26 keys have none.
+        if version < 2 { appearance.keyShadows = false }
+        version = max(version, Self.currentVersion)
     }
 
     public func encode(to encoder: Encoder) throws {

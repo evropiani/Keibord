@@ -7,8 +7,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.0.21"
-    CURRENT_PROJECT_VERSION: "22"
+    MARKETING_VERSION: "1.0.22"
+    CURRENT_PROJECT_VERSION: "23"
     TARGETED_DEVICE_FAMILY: "1"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: minimal
@@ -31,7 +31,14 @@ targets:
       - path: App/PrivacyInfo.xcprivacy
         buildPhase: resources
     dependencies:
+      # One keyboard per language (Settings › Keyboards lists them separately); all share the framework.
       - target: KeibordKeyboard
+      - target: KeibordKeyboardEN
+      - target: KeibordKeyboardSQ
+      - target: KeibordKeyboardIT
+      - target: KeibordKeyboardKit
+        embed: true
+        link: false
       - package: KeibordCore
     info:
       path: App/Info.plist
@@ -57,8 +64,154 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     scheme:
       testTargets: []
+  # Keibord Deutsch keeps the original keyboard's bundle id, so iOS keeps it enabled (with Full Access).
   KeibordKeyboard:
     type: app-extension
+    platform: iOS
+    sources:
+      - path: Keyboard/Entry
+      - path: Keyboard/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - target: KeibordKeyboardKit
+        embed: false
+    info:
+      path: Keyboard/Languages/de/Info.plist
+      properties:
+        CFBundleDisplayName: Keibord Deutsch
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: KeibordKeyboardKit.KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: true
+            PrefersRightToLeft: false
+            PrimaryLanguage: de-AT
+            RequestsOpenAccess: true
+        KeibordAppGroup: group.$(KEIBORD_BUNDLE_ID)
+        KeibordKeyboardLanguage: de
+    entitlements:
+      path: Keyboard/KeibordKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [group.$(KEIBORD_BUNDLE_ID)]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(KEIBORD_BUNDLE_ID).keyboard
+        PRODUCT_NAME: KeibordKeyboard
+        APPLICATION_EXTENSION_API_ONLY: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+  KeibordKeyboardEN:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Keyboard/Entry
+      - path: Keyboard/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - target: KeibordKeyboardKit
+        embed: false
+    info:
+      path: Keyboard/Languages/en/Info.plist
+      properties:
+        CFBundleDisplayName: Keibord English
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: KeibordKeyboardKit.KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: true
+            PrefersRightToLeft: false
+            PrimaryLanguage: en-GB
+            RequestsOpenAccess: true
+        KeibordAppGroup: group.$(KEIBORD_BUNDLE_ID)
+        KeibordKeyboardLanguage: en
+    entitlements:
+      path: Keyboard/KeibordKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [group.$(KEIBORD_BUNDLE_ID)]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(KEIBORD_BUNDLE_ID).keyboard.en
+        PRODUCT_NAME: KeibordKeyboardEN
+        APPLICATION_EXTENSION_API_ONLY: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+  KeibordKeyboardSQ:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Keyboard/Entry
+      - path: Keyboard/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - target: KeibordKeyboardKit
+        embed: false
+    info:
+      path: Keyboard/Languages/sq/Info.plist
+      properties:
+        CFBundleDisplayName: Keibord Shqip
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: KeibordKeyboardKit.KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: true
+            PrefersRightToLeft: false
+            PrimaryLanguage: sq-AL
+            RequestsOpenAccess: true
+        KeibordAppGroup: group.$(KEIBORD_BUNDLE_ID)
+        KeibordKeyboardLanguage: sq
+    entitlements:
+      path: Keyboard/KeibordKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [group.$(KEIBORD_BUNDLE_ID)]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(KEIBORD_BUNDLE_ID).keyboard.sq
+        PRODUCT_NAME: KeibordKeyboardSQ
+        APPLICATION_EXTENSION_API_ONLY: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+  KeibordKeyboardIT:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Keyboard/Entry
+      - path: Keyboard/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - target: KeibordKeyboardKit
+        embed: false
+    info:
+      path: Keyboard/Languages/it/Info.plist
+      properties:
+        CFBundleDisplayName: Keibord Italiano
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: KeibordKeyboardKit.KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: true
+            PrefersRightToLeft: false
+            PrimaryLanguage: it-IT
+            RequestsOpenAccess: true
+        KeibordAppGroup: group.$(KEIBORD_BUNDLE_ID)
+        KeibordKeyboardLanguage: it
+    entitlements:
+      path: Keyboard/KeibordKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [group.$(KEIBORD_BUNDLE_ID)]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(KEIBORD_BUNDLE_ID).keyboard.it
+        PRODUCT_NAME: KeibordKeyboardIT
+        APPLICATION_EXTENSION_API_ONLY: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+  # The keyboard's code, dictionaries and emoji data, once for all language keyboards.
+  KeibordKeyboardKit:
+    type: framework
     platform: iOS
     sources:
       - path: Keyboard/Sources
@@ -74,26 +227,15 @@ targets:
     dependencies:
       - package: KeibordCore
     info:
-      path: Keyboard/Info.plist
+      path: Keyboard/Kit/Info.plist
       properties:
-        CFBundleDisplayName: Keibord
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.keyboard-service
-          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
-          NSExtensionAttributes:
-            IsASCIICapable: true
-            PrefersRightToLeft: false
-            PrimaryLanguage: de-AT
-            RequestsOpenAccess: true
-        KeibordAppGroup: group.$(KEIBORD_BUNDLE_ID)
-    entitlements:
-      path: Keyboard/KeibordKeyboard.entitlements
-      properties:
-        com.apple.security.application-groups: [group.$(KEIBORD_BUNDLE_ID)]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(KEIBORD_BUNDLE_ID).keyboard
-        PRODUCT_NAME: KeibordKeyboard
+        PRODUCT_BUNDLE_IDENTIFIER: $(KEIBORD_BUNDLE_ID).keyboardkit
+        PRODUCT_NAME: KeibordKeyboardKit
         APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        DEFINES_MODULE: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"

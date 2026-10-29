@@ -116,9 +116,9 @@ struct HomeView: View {
 
             Section("Set up") {
                 Label("Open Settings → General → Keyboard → Keyboards", systemImage: "1.circle")
-                Label("Add New Keyboard… → Keibord", systemImage: "2.circle")
-                Label("Tap Keibord → Allow Full Access", systemImage: "3.circle")
-                Label("In any text field, hold 🌐 and pick Keibord", systemImage: "4.circle")
+                Label("Add New Keyboard… → Keibord → pick a language (Keibord Deutsch, English, Shqip, Italiano); repeat for each language", systemImage: "2.circle")
+                Label("Tap each Keibord keyboard → Allow Full Access", systemImage: "3.circle")
+                Label("In any text field, tap 🌐 to switch between them, hold it to pick one", systemImage: "4.circle")
                 Button("Open Keibord in Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                 }

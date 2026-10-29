@@ -103,7 +103,7 @@ struct LanguagesView: View {
             } header: {
                 Text("Enabled")
             } footer: {
-                Text("The language key on the keyboard cycles through these in order. Hold it to pick one.")
+                Text("Each language is a keyboard of its own: Settings › General › Keyboard › Keyboards › Add New Keyboard… › Keibord, then pick Keibord Deutsch, English, Shqip or Italiano. Switch with 🌐 below the keyboard. This list picks the variant (UK or US English, Albania or Kosovo) and the languages of multilingual typing.")
             }
             let available = KeyboardLanguage.allCases.filter { !model.settings.enabledLanguages.contains($0) }
             if !available.isEmpty {
@@ -234,7 +234,22 @@ struct AppearanceView: View {
                 Toggle("Key Shadows", isOn: $model.settings.appearance.keyShadows)
                 Toggle("Always Show Upper-Case Letters", isOn: $model.settings.appearance.uppercaseLabels)
                 Toggle("Number Row", isOn: $model.settings.appearance.showNumberRow)
-                Toggle("Language Name on Space Bar", isOn: $model.settings.appearance.showSpaceLanguageLabel)
+                Toggle("Languages on Space Bar", isOn: $model.settings.appearance.showSpaceLanguageLabel)
+            }
+            Section {
+                Button("Reset to iPhone Look") {
+                    var look = model.settings.appearance
+                    let iPhone = AppearanceSettings()
+                    look.lightColors = nil
+                    look.darkColors = nil
+                    look.keyShadows = iPhone.keyShadows
+                    look.keyCornerRadius = iPhone.keyCornerRadius
+                    look.labelScale = iPhone.labelScale
+                    look.uppercaseLabels = iPhone.uppercaseLabels
+                    model.settings.appearance = look
+                }
+            } footer: {
+                Text("Colours, shadows, corners and label size like the iPhone keyboard. Key height, number row and tinted keys stay as they are.")
             }
             ForEach([false, true], id: \.self) { dark in
                 Section(dark ? "Dark Colours" : "Light Colours") {
@@ -353,7 +368,7 @@ struct KeyboardPreview: View {
     private var layout: KeyboardLayout {
         LayoutFactory.layout(for: LayoutRequest(language: language, base: settings.baseLayout(for: language), page: page,
                                                 showNumberRow: settings.appearance.showNumberRow && page == .letters,
-                                                showLanguageKey: settings.activeLanguages.count > 1))
+                                                showLanguageKey: false))
     }
 
     private var metrics: KeyboardMetrics { KeyboardMetrics.standard(height: settings.appearance.keyHeight, landscape: false) }
@@ -362,7 +377,8 @@ struct KeyboardPreview: View {
         let layout = self.layout
         let metrics = self.metrics
         let colors = settings.appearance.colors(dark: dark)
-        let background = colors.background.map { Color($0) } ?? (dark ? Color(white: 0.17) : Color(red: 0.82, green: 0.84, blue: 0.87))
+        // The iOS 26/27 keyboard glass (#222222 / #E2E3E8).
+        let background = colors.background.map { Color($0) } ?? (dark ? Color(white: 0.133) : Color(red: 0.886, green: 0.89, blue: 0.91))
         GeometryReader { geo in
             let frames = LayoutGeometry.frames(for: layout, width: geo.size.width, metrics: metrics).filter { $0.key.style != .spacer }
             ZStack(alignment: .topLeading) {
@@ -396,14 +412,29 @@ struct KeyboardPreview: View {
                 .shadow(color: settings.appearance.keyShadows ? Color(colors.keyShadow) : .clear, radius: 0, x: 0, y: 1)
             if let symbol = iconName(key) {
                 Image(systemName: symbol).foregroundStyle(Color(labelColor))
+            } else if key.id == "space" {
+                // Like Apple's space bar: no word, the languages small in the corner ("DE EN").
+                Text(spaceCodes)
+                    .font(.system(size: 10.5 * settings.appearance.labelScale).width(.condensed))
+                    .foregroundStyle(Color(labelColor).opacity(dark ? 0.4 : 0.25))
+                    .padding(.trailing, 6)
+                    .padding(.bottom, 4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             } else {
                 Text(label(key))
-                    .font(.system(size: key.isLetter ? 20 * settings.appearance.labelScale : 14 * settings.appearance.labelScale))
+                    .font(.system(size: key.isLetter ? 21.5 * settings.appearance.labelScale : 16 * settings.appearance.labelScale))
                     .foregroundStyle(Color(labelColor))
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
             }
         }
+    }
+
+    /// The languages a keyboard of `language` types in (its own, then the other enabled ones).
+    private var spaceCodes: String {
+        guard settings.appearance.showSpaceLanguageLabel else { return "" }
+        let others = settings.multilingualTyping ? settings.activeLanguages.filter { $0.family != language.family } : []
+        return KeyboardLanguage.spaceBarCodes([language] + others)
     }
 
     private func baseFill(_ key: KeySpec, colors: KeyColorScheme) -> RGBAColor {
@@ -422,7 +453,6 @@ struct KeyboardPreview: View {
     }
 
     private func label(_ key: KeySpec) -> String {
-        if key.id == "space" { return settings.appearance.showSpaceLanguageLabel && settings.activeLanguages.count > 1 ? language.displayName : language.spaceKeyLabel }
         return key.isLetter && settings.appearance.uppercaseLabels ? key.label.uppercased() : key.label
     }
 }

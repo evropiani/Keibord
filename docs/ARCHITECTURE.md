@@ -30,7 +30,8 @@ Core/                       Swift package "KeibordCore" (Foundation only, builds
   Tests/KeibordCoreTests/   XCTest; Fixtures/ for small test data
 Shared/                     iOS-only Swift compiled into BOTH app and keyboard targets [H]
 App/                        SwiftUI container app (Sources/, Assets.xcassets, Keibord.entitlements) [I]
-Keyboard/                   Keyboard extension (Sources/, KeibordKeyboard.entitlements) [G]
+Keyboard/                   Keyboard: Sources/ (KeibordKeyboardKit.framework), Entry/ (each language keyboard's
+                            own file), KeibordKeyboard.entitlements [G]
 Resources/
   Dictionaries/             <id>.kbdl binary lexicons (de-AT, en-GB, en-US, sq, it) [A2]
   Emoji/                    emoji.json, keywords-<de|en|it|sq>.json [A2]
@@ -47,16 +48,25 @@ Letters in brackets name the owning work package (section 12).
 | Thing | Value |
 |---|---|
 | App bundle id | `com.keibord.app` (display name **Keibord**) |
-| Keyboard bundle id | `com.keibord.app.keyboard` (display name **Keibord**) |
+| Keyboard bundle ids | `com.keibord.app.keyboard` (**Keibord Deutsch**, the first keyboard's id), `….keyboard.en` (**Keibord English**), `….keyboard.sq` (**Keibord Shqip**), `….keyboard.it` (**Keibord Italiano**) |
+| Shared keyboard framework | `KeibordKeyboardKit.framework` (`com.keibord.app.keyboardkit`) in the app's Frameworks: all keyboard code, dictionaries and emoji data |
 | App group (default) | `group.com.keibord.app` |
 | Deployment target | iOS 17.0, iPhone only (`TARGETED_DEVICE_FAMILY = 1`) |
 | Swift | language mode 5 (`SWIFT_VERSION = 5.0`), strict concurrency minimal |
 | Version | `MARKETING_VERSION = 1.0.0`, build `1` |
 
-The keyboard extension's Info.plist `NSExtension`:
+Each language is a keyboard extension of its own (like Apple's keyboards: listed separately in
+Settings › Keyboards, switched with the globe key; there is no language key). The four extensions
+contain one empty source file (`Keyboard/Entry`) and link `KeibordKeyboardKit.framework` (embedded
+once in the app, loaded via `@executable_path/../../Frameworks`), so the 34 MB of dictionaries and
+the code exist once. Info.plist `NSExtension` of each:
 `NSExtensionPointIdentifier = com.apple.keyboard-service`,
-`NSExtensionPrincipalClass = $(PRODUCT_MODULE_NAME).KeyboardViewController`,
-`NSExtensionAttributes = { IsASCIICapable = YES, PrefersRightToLeft = NO, PrimaryLanguage = de-AT, RequestsOpenAccess = YES }`.
+`NSExtensionPrincipalClass = KeibordKeyboardKit.KeyboardViewController`,
+`NSExtensionAttributes = { IsASCIICapable = YES, PrefersRightToLeft = NO, PrimaryLanguage = de-AT | en-GB | sq-AL | it-IT, RequestsOpenAccess = YES }`,
+plus `KeibordKeyboardLanguage = de | en | sq | it` (`KeyboardLanguageFamily`). Full Access is set
+per keyboard in iOS Settings. The keyboard types its language; the app's language list picks the
+variant (en-GB/en-US, sq-AL/sq-XK) and the other languages of multilingual typing
+(`InputController.family`).
 
 Sideloading tools may rename the app group (AltStore/SideStore append the team id and list the
 real ids in the Info.plist key `ALTAppGroups`). **Never hard-code the group id** — use
@@ -462,7 +472,7 @@ Compiled into both targets (no framework). UIKit/CryptoKit/Security/CommonCrypto
 UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewController: UIInputViewController`.
 
 * **Lifecycle**: `viewDidLoad` → load settings/profile/user model from `KeibordStore`, create
-  `SuggestionEngine` (lexicons loaded lazily per language from the extension bundle
+  `SuggestionEngine` (lexicons loaded lazily per language from the framework bundle
   `Dictionaries/<id>.kbdl` and cached), `InputController`, views. `viewWillAppear` → reload changed
   files (modification dates), `configure(field:)` from `textDocumentProxy`, write
   `KeyboardRuntimeState` (hasFullAccess, lastActive, language, version, group id). `textWillChange`
@@ -514,7 +524,7 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   `.webSearch`→webSearch, `.numberPad`/`.asciiCapableNumberPad`→number, `.decimalPad`→decimal,
   `.phonePad`→phone). Also `autocapitalizationType`, `autocorrectionType`, `smartQuotesType`,
   `returnKeyType`, `enablesReturnKeyAutomatically`, `isSecureTextEntry`, `keyboardAppearance`.
-* **Height**: suggestion bar 36 pt (its words 3.5 pt above the middle; iOS pads the keyboard above it; emoji search 88 pt) + `metrics.keyboardHeight(rows:)`; set via a height constraint on
+* **Height**: suggestion bar 36 pt (its 17 pt words 2.5 pt below the middle, between the places centred with and without iOS's glass band; emoji search 88 pt) + `metrics.keyboardHeight(rows:)`; set via a height constraint on
   `view` (priority 999); recompute on rotation (`viewWillTransition`) and on layout changes.
 * **KeyboardView** (single view handling all touches; `isMultipleTouchEnabled = true`): lays out
   `KeyView`s from `LayoutGeometry.frames`, resolves touches through `TouchResolver` (with the
@@ -526,11 +536,17 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   above the keyboard). Backspace: delete on touch-down, repeat after 0.5 s every 0.09 s, switch to
   word mode after 1.2 s. Shift: tap / double-tap within 0.3 s → caps lock; its release (also cancelled) → `.shiftReleased`. Space: tap inserts; long
   press (0.4 s, when `settings.spacebarCursor`) → trackpad mode (key labels fade), horizontal drag of
-  ~9 pt per character → `.moveCursor`. Language key: tap → next language, long-press → list.
+  ~9 pt per character → `.moveCursor`. The language key (tap → next language, long-press → list)
+  only exists without a `KeyboardLanguageFamily` (tests); the language keyboards have none.
   Globe: `handleInputModeList(from:with:)` via `addTarget` for all touch events. Emoji key → emoji panel.
-* **KeyView**: rounded rect (`settings.appearance.keyCornerRadius`), optional 1-pt bottom shadow,
-  label (system font: letters 23 pt × labelScale, function keys 16 pt) or SF Symbol icons
+* **KeyView**: rounded rect (`settings.appearance.keyCornerRadius`), optional 1-pt bottom shadow
+  (off by default, as on iOS 26), label sizes of the iOS 26/27 keyboard measured from screenshots
+  (letters 24.5 pt × labelScale, "123"/words 18 pt, icons ≈ 19 pt) or SF Symbol icons
   (`shift`, `shift.fill`, `capslock.fill`, `delete.left`, `globe`, `face.smiling`, `return`).
+  The space bar has no word, only Apple's small condensed language codes at the bottom right ("DE EN")
+  when the keyboard types in more than one language (`KeyboardLanguage.spaceBarCodes`).
+  Default colours = the iOS 26/27 keyboard: every key white (#FFFFFF) on light glass, #454545 on dark
+  glass (#222222), function keys like letter keys; a pressed key without a preview turns grey.
   Colours from `appearance.colors(dark:)` where dark = theme `.dark`, or `.system` and
   (`keyboardAppearance == .dark` or `traitCollection.userInterfaceStyle == .dark`). Tinted keys
   override key colour/label colour for matching `KeySpec.id`. Return key uses `accent` when

@@ -2,7 +2,18 @@ import UIKit
 import AudioToolbox
 import KeibordCore
 
+/// The keyboard of one language. Each language is its own keyboard extension (Keibord Deutsch, English,
+/// Shqip, Italiano) whose Info.plist names its language (`KeibordKeyboardLanguage`) and this class as
+/// its principal class; the code, dictionaries and emoji live once in KeibordKeyboardKit.framework.
 final class KeyboardViewController: UIInputViewController {
+    /// The language of this keyboard extension (Info.plist `KeibordKeyboardLanguage`); `nil` (tests, an
+    /// older single keyboard) switches between the enabled languages.
+    static let bundleLanguageFamily = (Bundle.main.object(forInfoDictionaryKey: "KeibordKeyboardLanguage") as? String)
+        .flatMap(KeyboardLanguageFamily.init(rawValue:))
+    /// Dictionaries and emoji data: in the shared framework, next to this class.
+    private static let resources = Bundle(for: KeyboardViewController.self)
+
+    var languageFamily: KeyboardLanguageFamily? = KeyboardViewController.bundleLanguageFamily
     private let store = KeibordStore.shared
     private var settings = KeibordSettings()
     private var profile = PersonalProfile()
@@ -122,14 +133,14 @@ final class KeyboardViewController: UIInputViewController {
         super.viewDidLoad()
         let loadStart = Date()
         MainThreadWatchdog.shared.start(for: self)
-        KeyboardLog.shared.add("open \(KeibordVersion.display): loading (memory \(KeyboardDiagnostics.memoryDescription))")
+        KeyboardLog.shared.add("open \(KeibordVersion.display)\(languageFamily.map { " " + $0.keyboardName } ?? ""): loading (memory \(KeyboardDiagnostics.memoryDescription))")
         settings = store.loadSettings()
         settingsDate = store.modificationDate(of: .settings)
         profile = store.loadProfile()
         profileDate = store.modificationDate(of: .profile)
 
         engine = SuggestionEngine { language in
-            guard let url = Bundle.main.url(forResource: language.dictionaryID, withExtension: "kbdl", subdirectory: "Dictionaries") else { return nil }
+            guard let url = KeyboardViewController.resources.url(forResource: language.dictionaryID, withExtension: "kbdl", subdirectory: "Dictionaries") else { return nil }
             return try? BinaryLexicon(url: url)
         }
         engine.setProfile(profile.info)
@@ -138,7 +149,7 @@ final class KeyboardViewController: UIInputViewController {
 
         document = ProxyDocument(owner: self)
         let state = store.loadState()
-        controller = InputController(document: document, engine: engine, settings: settings, language: state.currentLanguage)
+        controller = InputController(document: document, engine: engine, settings: settings, language: state.currentLanguage, family: languageFamily)
         controller.delegate = self
         controller.learningSink = self
 
@@ -697,7 +708,9 @@ final class KeyboardViewController: UIInputViewController {
             page: searching ? searchPage : controller.page,
             variant: searching ? .standard : field.layoutVariant,
             showNumberRow: numberRow && controller.page == .letters,
-            showLanguageKey: settings.activeLanguages.count > 1 && !searching,
+            // No language key: each language is its own keyboard (the globe key below switches); a keyboard
+            // without a language (tests) still has one.
+            showLanguageKey: languageFamily == nil && settings.activeLanguages.count > 1 && !searching,
             showGlobeKey: globeKey,
             // While searching, return only closes the search: a plain return key, never "Send".
             returnKind: searching ? .default : field.returnKind
@@ -714,12 +727,12 @@ final class KeyboardViewController: UIInputViewController {
 
         if mode == .keys || searching {
             let offsets = touchOffsets(for: layout)
-            let multiple = settings.activeLanguages.count > 1
-            let spaceLabel = settings.appearance.showSpaceLanguageLabel && multiple ? controller.language.displayName : controller.language.spaceKeyLabel
+            // Like Apple's space bar: no word, only the languages ("DE EN") when it types in more than one.
+            let spaceLabel = settings.appearance.showSpaceLanguageLabel ? KeyboardLanguage.spaceBarCodes(controller.languages) : ""
             // The return key is dimmed (and inactive) only when both the field and the context agree it is empty.
             let empty = !proxyConnected || !textDocumentProxy.hasText && (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty
                 && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
-            keyboardView.languages = settings.activeLanguages
+            keyboardView.languages = languageFamily == nil ? settings.activeLanguages : []
             // While searching emoji, keys type into the query: no trackpad, and letters arrive lower-case.
             keyboardView.spacebarCursor = settings.spacebarCursor && !searching
             keyboardView.letterPrior = letterPrior(for: request.page)
@@ -906,7 +919,7 @@ final class KeyboardViewController: UIInputViewController {
     private func loadCatalog() -> EmojiCatalog? {
         if !emojiCatalogLoaded {
             emojiCatalogLoaded = true
-            if let url = Bundle.main.url(forResource: "Emoji", withExtension: nil) {
+            if let url = Self.resources.url(forResource: "Emoji", withExtension: nil) {
                 emojiCatalog = try? EmojiCatalog(baseURL: url)
             }
         }
@@ -944,7 +957,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func updateEmojiSearch(_ query: String) {
-        let codes = Array(Set(settings.activeLanguages.map { $0.emojiKeywordCode } + ["en"])).sorted()
+        let codes = Array(Set((controller.languages + settings.activeLanguages).map { $0.emojiKeywordCode } + ["en"])).sorted()
         let results: [String]
         if query.trimmingCharacters(in: .whitespaces).isEmpty {
             results = emojiRecents

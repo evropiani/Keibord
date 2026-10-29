@@ -50,4 +50,23 @@ final class FoundationTests: XCTestCase {
         XCTAssertFalse(FieldContext(kind: .email).learningAllowed)
         XCTAssertTrue(FieldContext(kind: .text).autocorrectAllowed)
     }
+
+    func testEveryLanguageBelongsToOneKeyboard() {
+        for family in KeyboardLanguageFamily.allCases {
+            XCTAssertFalse(family.variants.isEmpty)
+            for language in family.variants { XCTAssertEqual(language.family, family) }
+            XCTAssertEqual(family.language(enabled: []), family.variants[0])
+            XCTAssertTrue(family.keyboardName.hasPrefix("Keibord "))
+        }
+        XCTAssertEqual(Set(KeyboardLanguageFamily.allCases.flatMap(\.variants)), Set(KeyboardLanguage.allCases))
+        XCTAssertEqual(KeyboardLanguageFamily.sq.language(enabled: [.deAT, .sqXK, .sqAL]), .sqXK)
+        XCTAssertEqual(KeyboardLanguageFamily.en.language(enabled: [.deAT]), .enGB)
+    }
+
+    func testSpaceBarCodesLikeApple() {
+        XCTAssertEqual(KeyboardLanguage.spaceBarCodes([.deAT, .enGB]), "DE EN")
+        XCTAssertEqual(KeyboardLanguage.spaceBarCodes([.deAT]), "", "one language: nothing, like Apple's keyboard")
+        XCTAssertEqual(KeyboardLanguage.spaceBarCodes([.enGB, .enUS]), "", "variants of one language count once")
+        XCTAssertEqual(KeyboardLanguage.spaceBarCodes([.sqXK, .deAT, .itIT]), "SQ DE IT")
+    }
 }

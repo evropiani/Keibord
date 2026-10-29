@@ -1,7 +1,8 @@
-Keibord 1.0.21: the suggestions no longer sit against the top edge in apps.
+Keibord 1.0.22: one keyboard per language, and the look of the iPhone keyboard.
 
-- iOS draws a thin glass strip (17 pt) above third-party keyboards, but not everywhere: it is always there in Spotlight and the App Library, while apps start without it and only get it after switching apps (or after Apple's own keyboard, for example in a password field). Other keyboard developers have reported the same to Apple. A keyboard cannot tell whether the strip is there.
-- Since 1.0.8 the suggestions were placed for the strip, so in apps without it they sat right against the top edge. They now sit 6 pt lower, between the two cases: a little high without the strip, a little low with it, and never against the edge.
-- 1.0.20 blamed height changes for the missing strip; that was wrong (the strip comes and goes by itself). Its changes stay: the keyboard keeps one height on every page.
+- Each language is now its own keyboard, like Apple's: Keibord Deutsch, Keibord English, Keibord Shqip and Keibord Italiano. The language key next to the emoji key is gone; switch with the globe key below the keyboard (tap: next keyboard, hold: list). Your current Keibord keyboard becomes Keibord Deutsch and stays enabled. Add the others in Settings › General › Keyboard › Keyboards › Add New Keyboard… › Keibord, and allow Full Access for each one.
+- Multilingual typing still works in every keyboard: the German keyboard also suggests and corrects English (and the other languages in the app), with the German layout. The app's language list picks the variant of each keyboard (UK or US English, Albania or Kosovo).
+- The colours and keys now match the iOS 26/27 keyboard, in light and dark mode: function keys (shift, delete, 123, emoji, return) look like the letter keys, no key shadows, Apple's label sizes, and the space bar shows only the languages small in its corner ("DE EN").
+- Your Label Size setting stays as you set it; Theme & Keys › Reset to iPhone Look sets colours, shadows, corners and label size like the iPhone keyboard.
 
-Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboard), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.
+Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboards), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data. The app now contains four keyboards: a free Apple ID in SideStore/AltStore needs three more App IDs once.

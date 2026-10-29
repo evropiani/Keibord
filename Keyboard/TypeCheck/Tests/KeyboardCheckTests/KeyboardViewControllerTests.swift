@@ -67,11 +67,12 @@ final class KeyboardViewControllerTests: XCTestCase {
     }
 
     private func start(settings: KeibordSettings? = nil, fullAccess: Bool = false, systemBackdrop: UIUserInterfaceStyle = .light,
-                       configure: (TestProxy) -> Void = { _ in }) {
+                       family: KeyboardLanguageFamily? = nil, configure: (TestProxy) -> Void = { _ in }) {
         if let settings = settings { KeibordStore.shared.saveSettings(settings) }
         proxy = TestProxy()
         configure(proxy)
         vc = KeyboardViewController()
+        vc.languageFamily = family
         vc.testProxy = proxy
         vc.testHasFullAccess = fullAccess
         vc.testTraitCollection = UITraitCollection(testStyle: systemBackdrop)
@@ -389,16 +390,58 @@ final class KeyboardViewControllerTests: XCTestCase {
         vc.viewWillDisappear(false)
     }
 
-    func testLanguageKeySwitchesLayoutAndSpaceLabel() {
+    /// Each language is its own iOS keyboard: no language key (it sat next to the emoji key and was hit
+    /// instead of it); the space bar shows the languages like Apple's ("EN DE"), no word.
+    func testALanguageKeyboardHasNoLanguageKeyAndShowsItsLanguagesOnTheSpaceBar() {
+        var settings = KeibordSettings()
+        settings.enabledLanguages = [.deAT, .enUS]
+        start(settings: settings, family: .en)
+        XCTAssertEqual(keyboard.layout?.language, .enUS, "the English keyboard, in the variant chosen in the app")
+        XCTAssertNil(keyView("language"))
+        XCTAssertNotNil(keyView("emoji"))
+        XCTAssertNil(keyView("ü"), "QWERTY without the German letters")
+        let space = keyView("space")
+        XCTAssertNil(space?.label.text)
+        XCTAssertEqual(space?.cornerLabel?.text, "EN DE")
+        send(.nextLanguage)
+        XCTAssertEqual(keyboard.layout?.language, .enUS, "nothing switches the language inside a language keyboard")
+        vc.viewWillDisappear(false)
+
+        settings.multilingualTyping = false
+        start(settings: settings, family: .de)
+        XCTAssertEqual(keyboard.layout?.language, .deAT)
+        XCTAssertNotNil(keyView("ü"))
+        XCTAssertNil(keyView("space")?.cornerLabel?.text, "one language: a plain space bar, like Apple's")
+        vc.viewWillDisappear(false)
+    }
+
+    /// Without a language of its own (an older single keyboard) the language key still switches.
+    func testAKeyboardWithoutALanguageSwitchesWithTheLanguageKey() {
         start()
-        XCTAssertEqual(keyView("space")?.label.text, "Deutsch (Österreich)")
+        XCTAssertNotNil(keyView("language"))
+        XCTAssertEqual(keyView("space")?.cornerLabel?.text, "DE EN")
         send(.nextLanguage)
         XCTAssertEqual(keyboard.layout?.language, .enGB)
-        XCTAssertEqual(keyView("space")?.label.text, "English (UK)")
+        XCTAssertEqual(keyView("space")?.cornerLabel?.text, "EN DE")
         XCTAssertNotNil(keyView("y"))
         send(.selectLanguage(.deAT))
         XCTAssertEqual(keyboard.layout?.language, .deAT)
         XCTAssertNotNil(keyView("ü"))
+    }
+
+    /// The iOS 26/27 look: function keys in the letter keys' colour, no shadows, a pressed key turns grey.
+    func testTheDefaultLookIsTheIOS26Keyboard() {
+        for dark in [false, true] {
+            start(settings: KeibordSettings(), systemBackdrop: dark ? .dark : .light) { $0.keyboardAppearance = dark ? .dark : .light }
+            let letter = keyView("a")?.appliedAppearance
+            let shift = keyView("shift")?.appliedAppearance
+            XCTAssertNotNil(letter)
+            XCTAssertEqual(letter?.fill, shift?.fill, "dark \(dark): shift looks like a letter key")
+            XCTAssertEqual(letter?.shadowHidden, true)
+            XCTAssertEqual(keyView("return")?.appliedAppearance?.fill, letter?.fill)
+            XCTAssertEqual(letter?.fill, dark ? UIColor(red: 69 / 255, green: 69 / 255, blue: 69 / 255, alpha: 1) : UIColor(red: 1, green: 1, blue: 1, alpha: 1))
+            vc.viewWillDisappear(false)
+        }
     }
 
     func testBackspaceWordModeAndTrackpadEditTheDocument() {

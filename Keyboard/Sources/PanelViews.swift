@@ -69,7 +69,8 @@ final class SuggestionBarView: UIView {
                     b.setTitle(s.display, for: .normal)
                     b.setTitleColor(s.kind == .action ? theme.accentColor : theme.labelUIColor, for: .normal)
                     let bold = s.isAutocorrect || s.kind == .card || s.kind == .action
-                    b.titleLabel?.font = .systemFont(ofSize: 16, weight: bold ? .semibold : .regular)
+                    // 17 pt like the iOS 26/27 suggestions.
+                    b.titleLabel?.font = .systemFont(ofSize: 17, weight: bold ? .semibold : .regular)
                 } else {
                     b.isHidden = true
                     b.setTitle(nil, for: .normal)

@@ -47,11 +47,18 @@ public enum UIUserInterfaceSizeClass: Int { case unspecified, compact, regular }
 public enum UIUserInterfaceStyle: Int { case unspecified, light, dark }
 
 open class UIColor: NSObject {
-    public init(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) { super.init() }
-    public init(white: CGFloat, alpha: CGFloat) { super.init() }
-    open func withAlphaComponent(_ alpha: CGFloat) -> UIColor { self }
+    /// sRGB components, compared by `==` like UIKit's colours.
+    public let components: [CGFloat]
+    public init(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) { components = [red, green, blue, alpha]; super.init() }
+    public init(white: CGFloat, alpha: CGFloat) { components = [white, white, white, alpha]; super.init() }
+    open func withAlphaComponent(_ alpha: CGFloat) -> UIColor { UIColor(red: components[0], green: components[1], blue: components[2], alpha: alpha) }
     open var cgColor: CGColor { CGColor() }
-    open func getRed(_ red: UnsafeMutablePointer<CGFloat>?, green: UnsafeMutablePointer<CGFloat>?, blue: UnsafeMutablePointer<CGFloat>?, alpha: UnsafeMutablePointer<CGFloat>?) -> Bool { true }
+    open func getRed(_ red: UnsafeMutablePointer<CGFloat>?, green: UnsafeMutablePointer<CGFloat>?, blue: UnsafeMutablePointer<CGFloat>?, alpha: UnsafeMutablePointer<CGFloat>?) -> Bool {
+        red?.pointee = components[0]; green?.pointee = components[1]; blue?.pointee = components[2]; alpha?.pointee = components[3]
+        return true
+    }
+    open override func isEqual(_ object: Any?) -> Bool { (object as? UIColor)?.components == components }
+    open override var hash: Int { components.map { Int($0 * 255) }.reduce(0) { $0 &* 31 &+ $1 } }
     open class var clear: UIColor { UIColor(white: 0, alpha: 0) }
     open class var white: UIColor { UIColor(white: 1, alpha: 1) }
     open class var black: UIColor { UIColor(white: 0, alpha: 1) }
@@ -67,7 +74,13 @@ open class UIFont: NSObject {
         public static let ultraLight = Weight(-0.8), thin = Weight(-0.6), light = Weight(-0.4), regular = Weight(0)
         public static let medium = Weight(0.23), semibold = Weight(0.3), bold = Weight(0.4), heavy = Weight(0.56), black = Weight(0.62)
     }
+    public struct Width: Hashable, RawRepresentable {
+        public var rawValue: CGFloat
+        public init(rawValue: CGFloat) { self.rawValue = rawValue }
+        public static let condensed = Width(rawValue: -0.2), standard = Width(rawValue: 0), expanded = Width(rawValue: 0.2), compressed = Width(rawValue: -0.3)
+    }
     open class func systemFont(ofSize fontSize: CGFloat, weight: UIFont.Weight) -> UIFont { UIFont() }
+    open class func systemFont(ofSize fontSize: CGFloat, weight: UIFont.Weight, width: UIFont.Width) -> UIFont { UIFont() }
     open class func systemFont(ofSize fontSize: CGFloat) -> UIFont { UIFont() }
     open class func boldSystemFont(ofSize fontSize: CGFloat) -> UIFont { UIFont() }
 }
@@ -321,6 +334,7 @@ open class UIView: UIResponder {
         view.parent = self
         children.insert(view, at: min(max(index, 0), children.count))
     }
+    open func sizeThatFits(_ size: CGSize) -> CGSize { bounds.size }
     open func setNeedsLayout() { needsLayout = true }
     open func setNeedsUpdateConstraints() {}
     open func layoutIfNeeded() {
@@ -366,6 +380,8 @@ open class UILabel: UIView {
     open var textColor: UIColor!
     open var font: UIFont!
     open var textAlignment: NSTextAlignment = .natural
+    /// Rough text size (7 × 15 pt per character): enough for layout code to place a label.
+    open override func sizeThatFits(_ size: CGSize) -> CGSize { CGSize(width: CGFloat(text?.count ?? 0) * 7, height: 15) }
     open var adjustsFontSizeToFitWidth: Bool = false
     open var minimumScaleFactor: CGFloat = 0
     open var lineBreakMode: NSLineBreakMode = .byTruncatingTail

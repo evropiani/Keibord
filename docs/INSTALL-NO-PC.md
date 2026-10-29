@@ -31,7 +31,8 @@ Tip: in Safari, tap **aA → Request Desktop Website** if a page looks broken.
 1. **Certificates, IDs & Profiles → Identifiers → +** → *App Groups* → Description `Keibord`, identifier `group.com.keibord.app` → Register.
 2. **Identifiers → +** → *App IDs* → *App* → Description `Keibord`, Bundle ID (explicit) `com.keibord.app`.
    Under Capabilities tick **App Groups** → Continue → Register. Open the new ID again → App Groups → **Configure** → tick `group.com.keibord.app` → Save.
-3. Do the same for the keyboard: Description `Keibord Keyboard`, Bundle ID `com.keibord.app.keyboard`, App Groups → same group.
+3. Do the same for each keyboard (one per language), each with App Groups → same group:
+   `com.keibord.app.keyboard` (Keibord Deutsch), `com.keibord.app.keyboard.en`, `com.keibord.app.keyboard.sq`, `com.keibord.app.keyboard.it`.
 4. Note your **Team ID**: **Membership details** (10 characters, e.g. `A1B2C3D4E5`).
 
 > If Apple says `com.keibord.app` is not available, use your own prefix, for example `at.hamza.keibord`, `at.hamza.keibord.keyboard` and `group.at.hamza.keibord`.
@@ -68,7 +69,7 @@ Repository **evropiani/Keibord → Settings → Secrets and variables → Action
 1. App Store Connect → your app → **TestFlight → Internal Testing → +** → create a group (e.g. `Me`) and add yourself as a tester.
 2. Install **TestFlight** from the App Store and open the invitation email (or TestFlight shows the app directly). Tap **Install**.
 3. In TestFlight, open Keibord and turn on **Automatic Updates**.
-4. **Settings → General → Keyboard → Keyboards → Add New Keyboard… → Keibord**, then tap **Keibord → Allow Full Access**.
+4. **Settings → General → Keyboard → Keyboards → Add New Keyboard… → Keibord**, pick a language keyboard (Keibord Deutsch, English, Shqip, Italiano; repeat for each), then tap each one → **Allow Full Access**.
 
 ### Moving your data from the sideloaded version
 The TestFlight version is signed by your own team, so it has its own storage.

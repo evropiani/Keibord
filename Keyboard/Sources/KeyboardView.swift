@@ -44,16 +44,21 @@ struct KeyContent: Equatable {
     var symbol: String?
     var symbolSize: CGFloat = 0
     var symbolWeight: UIImage.SymbolWeight = .regular
+    /// Small text in the bottom right corner (the space bar's "DE EN", like Apple's keyboard).
+    var cornerText: String?
+    var cornerFontSize: CGFloat = 0
 }
 
 /// One drawn key.
 final class KeyView: UIView {
     let label = UILabel()
     let icon = UIImageView()
+    /// Only the space bar has one (created on first use).
+    private(set) var cornerLabel: UILabel?
     private let shadowLayer = CALayer()
     private let fill = CALayer()
     var key: KeySpec
-    private var appliedAppearance: KeyAppearance?
+    private(set) var appliedAppearance: KeyAppearance?
     private var appliedContent: KeyContent?
 
     init(key: KeySpec) {
@@ -86,6 +91,7 @@ final class KeyView: UIView {
         CATransaction.commit()
         label.textColor = a.label
         icon.tintColor = a.label
+        cornerLabel?.textColor = a.label
     }
 
     /// Applies text and icon; unchanged labels are not reset (that would redraw every label per touch).
@@ -104,6 +110,18 @@ final class KeyView: UIView {
                 icon.image = nil
             }
         }
+        if c.cornerText != old?.cornerText || c.cornerFontSize != old?.cornerFontSize {
+            if c.cornerText != nil, cornerLabel == nil {
+                let corner = UILabel()
+                corner.textAlignment = .right
+                corner.textColor = appliedAppearance?.label
+                addSubview(corner)
+                cornerLabel = corner
+            }
+            cornerLabel?.text = c.cornerText
+            cornerLabel?.font = .systemFont(ofSize: max(c.cornerFontSize, 1), weight: .regular, width: .condensed)
+            setNeedsLayout()
+        }
     }
 
     override func layoutSubviews() {
@@ -115,6 +133,11 @@ final class KeyView: UIView {
         CATransaction.commit()
         label.frame = bounds.insetBy(dx: 2, dy: 0)
         icon.frame = bounds
+        if let corner = cornerLabel {
+            // Like Apple's space bar: about 7 pt from the right and 6 pt from the bottom edge.
+            let size = corner.sizeThatFits(CGSize(width: bounds.width, height: bounds.height))
+            corner.frame = CGRect(x: bounds.maxX - 7 - size.width, y: bounds.maxY - 6 - size.height, width: size.width, height: size.height)
+        }
     }
 }
 
@@ -334,6 +357,7 @@ final class KeyboardView: UIView {
             if view.alpha != alpha { view.alpha = alpha }
             if view.label.alpha != labelAlpha { view.label.alpha = labelAlpha }
             if view.icon.alpha != labelAlpha { view.icon.alpha = labelAlpha }
+            if let corner = view.cornerLabel, corner.alpha != labelAlpha { corner.alpha = labelAlpha }
         }
     }
 
@@ -341,25 +365,27 @@ final class KeyboardView: UIView {
         var fill = theme.keyColor(key, prominentReturn: prominentReturn)
         // Keys with a preview balloon keep their colour while pressed (the balloon is the feedback).
         if pressed, !showsPopup(for: key) {
-            fill = key.style == .function || key.style == .returnKey ? theme.pressedFunctionKeyColor : theme.functionKeyColor
+            fill = theme.pressedColor(for: key)
         }
         if key.id == "shift", shiftState != .off, theme.tints[key.id] == nil {
             fill = theme.characterKeyColor
         }
         var labelColor = theme.labelColor(key, prominentReturn: prominentReturn)
-        if key.id == "space", theme.tints["space"] == nil { labelColor = theme.secondaryLabel }
+        if key.id == "space", theme.tints["space"] == nil { labelColor = theme.spaceCodesColor }
         return KeyAppearance(fill: fill, label: labelColor, shadow: theme.keyShadowColor, cornerRadius: theme.cornerRadius,
                              shadowHidden: !theme.shadows || key.style == .spacer)
     }
 
+    /// Label sizes at 100 % are those of the iOS 26/27 keyboard, measured from screenshots: letters
+    /// 24.5 pt, "123" and other words 18 pt, icons about 19 pt.
     private func content(for key: KeySpec, theme: KeyboardTheme) -> KeyContent {
         let scale = theme.labelScale
         switch key.id {
         case "shift":
             let name = shiftState == .locked ? "capslock.fill" : (shiftState == .on ? "shift.fill" : "shift")
-            return KeyContent(symbol: name, symbolSize: 18 * scale, symbolWeight: .medium)
+            return KeyContent(symbol: name, symbolSize: 18.5 * scale, symbolWeight: .medium)
         case "backspace":
-            return KeyContent(symbol: "delete.left", symbolSize: 18 * scale)
+            return KeyContent(symbol: "delete.left", symbolSize: 19 * scale)
         case "emoji":
             return KeyContent(symbol: "face.smiling", symbolSize: 20 * scale)
         case "globe":
@@ -367,17 +393,18 @@ final class KeyboardView: UIView {
         case "return" where key.label.isEmpty:
             return KeyContent(symbol: "return", symbolSize: 19 * scale)
         case "space":
-            return KeyContent(text: spaceLabel, fontSize: 15 * scale)
+            // Apple's space bar has no word on it, only the languages of a multilingual keyboard.
+            return KeyContent(cornerText: spaceLabel.isEmpty ? nil : spaceLabel, cornerFontSize: 12.5 * scale)
         default:
             break
         }
         let text = displayLabel(key, theme: theme)
         switch key.style {
         case .character:
-            let size: CGFloat = key.isLetter ? 23 : (text.count > 1 ? 16 : 22)
+            let size: CGFloat = key.isLetter ? 24.5 : (text.count > 1 ? 17 : 23.5)
             return KeyContent(text: text, fontSize: size * scale)
         default:
-            return KeyContent(text: text, fontSize: 15 * scale)
+            return KeyContent(text: text, fontSize: 18 * scale)
         }
     }
 

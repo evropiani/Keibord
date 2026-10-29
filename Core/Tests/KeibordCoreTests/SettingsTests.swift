@@ -225,4 +225,27 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(Set(KeibordFile.allCases.map(\.rawValue)).count, KeibordFile.allCases.count)
         XCTAssertEqual(KeibordFile.userModel.rawValue, "user-model.json")
     }
+
+    // MARK: iOS 26 look
+
+    func testOldSettingsLoseTheKeyShadowsIOS26KeysDoNotHave() throws {
+        let old = try decode(KeibordSettings.self, #"{"version": 1, "appearance": {"keyShadows": true, "labelScale": 0.8}}"#)
+        XCTAssertFalse(old.appearance.keyShadows)
+        XCTAssertEqual(old.appearance.labelScale, 0.8, "only the shadows change")
+        XCTAssertEqual(old.version, KeibordSettings.currentVersion)
+        let chosen = try decode(KeibordSettings.self, #"{"version": 2, "appearance": {"keyShadows": true}}"#)
+        XCTAssertTrue(chosen.appearance.keyShadows, "turned on again after the change: kept")
+        XCTAssertFalse(KeibordSettings().appearance.keyShadows)
+        XCTAssertEqual(try decode(KeibordSettings.self, #"{"version": 9}"#).version, 9, "a newer file keeps its version")
+    }
+
+    func testIOS26ColoursShareOneKeyColour() {
+        for scheme in [KeyColorScheme.systemLight, .systemDark] {
+            XCTAssertEqual(scheme.characterKey, scheme.functionKey, "function keys look like letter keys on iOS 26")
+            XCTAssertNotEqual(scheme.pressedFunctionKey, scheme.characterKey, "a pressed key still shows")
+            XCTAssertNil(scheme.background)
+        }
+        XCTAssertEqual(KeyColorScheme.systemLight.characterKey.hexString, "#FFFFFFFF")
+        XCTAssertEqual(KeyColorScheme.systemDark.characterKey.hexString, "#454545FF")
+    }
 }

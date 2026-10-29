@@ -30,12 +30,17 @@ struct KeyboardTheme {
     let labelUIColor: UIColor
     let keyShadowColor: UIColor
     let secondaryLabel: UIColor
+    /// The space bar's language codes: light grey like Apple's ("DE EN").
+    let spaceCodesColor: UIColor
+    /// Letter and function keys share one colour (iOS 26): a pressed key then needs its own colour.
+    let uniformKeys: Bool
     let backgroundColor: UIColor
     /// Opaque background for when the system's keyboard backdrop does not match this theme: the custom
     /// background, or the iOS keyboard colours.
     let backdropColor: UIColor
-    static let lightBackdrop = UIColor(red: 0.82, green: 0.827, blue: 0.851, alpha: 1) // #D1D3D9
-    static let darkBackdrop = UIColor(red: 0.169, green: 0.169, blue: 0.169, alpha: 1) // #2B2B2B
+    /// iOS 26/27 keyboard glass, measured from screenshots.
+    static let lightBackdrop = UIColor(red: 0.886, green: 0.89, blue: 0.91, alpha: 1) // #E2E3E8
+    static let darkBackdrop = UIColor(red: 0.133, green: 0.133, blue: 0.133, alpha: 1) // #222222
     private let tintFills: [String: UIColor]
     private let tintLabels: [String: UIColor]
 
@@ -67,6 +72,8 @@ struct KeyboardTheme {
         labelUIColor = c.label.uiColor
         keyShadowColor = c.keyShadow.uiColor
         secondaryLabel = labelUIColor.withAlphaComponent(0.55)
+        spaceCodesColor = labelUIColor.withAlphaComponent(dark ? 0.4 : 0.25)
+        uniformKeys = c.characterKey == c.functionKey
         // Never fully transparent: a clear keyboard takes no touches (see `UIColor.touchableClear`).
         if let background = c.background, background.alpha >= 0.01 {
             backgroundColor = background.uiColor
@@ -85,6 +92,13 @@ struct KeyboardTheme {
         case .function: return functionKeyColor
         case .spacer: return .clear
         }
+    }
+
+    /// A pressed key without a preview balloon. Where letter and function keys differ (custom colours, the
+    /// look before iOS 26), letters take the function key colour and function keys the pressed colour.
+    func pressedColor(for key: KeySpec) -> UIColor {
+        if uniformKeys || key.style == .function || key.style == .returnKey { return pressedFunctionKeyColor }
+        return functionKeyColor
     }
 
     func labelColor(_ key: KeySpec, prominentReturn: Bool) -> UIColor {

@@ -68,7 +68,7 @@ public struct RGBAColor: Codable, Hashable, Sendable {
 public struct KeyColorScheme: Codable, Hashable, Sendable {
     /// Letter / digit / symbol keys.
     public var characterKey: RGBAColor
-    /// Shift, backspace, 123, emoji, language, return (when not prominent).
+    /// Shift, backspace, 123, emoji, return (when not prominent).
     public var functionKey: RGBAColor
     public var label: RGBAColor
     /// Keyboard background. `nil` = the system keyboard backdrop.
@@ -76,7 +76,8 @@ public struct KeyColorScheme: Codable, Hashable, Sendable {
     /// Prominent return key (go/search/send/done…) and highlights.
     public var accent: RGBAColor
     public var keyShadow: RGBAColor
-    /// Pressed-key highlight for function keys.
+    /// Pressed-key highlight for function keys; when letter and function keys share one colour (iOS 26),
+    /// for every key that shows no preview balloon.
     public var pressedFunctionKey: RGBAColor
 
     public init(characterKey: RGBAColor, functionKey: RGBAColor, label: RGBAColor, background: RGBAColor? = nil, accent: RGBAColor, keyShadow: RGBAColor, pressedFunctionKey: RGBAColor) {
@@ -89,21 +90,23 @@ public struct KeyColorScheme: Codable, Hashable, Sendable {
         self.pressedFunctionKey = pressedFunctionKey
     }
 
-    /// iOS-like light keyboard.
+    /// The iPhone keyboard of iOS 26/27 in light mode, measured from screenshots: every key white (the
+    /// function keys too), black labels, no key shadows; a pressed key without a preview turns grey.
     public static let systemLight = KeyColorScheme(
         characterKey: RGBAColor(hex: "#FFFFFF")!,
-        functionKey: RGBAColor(hex: "#ABB0BA")!,
+        functionKey: RGBAColor(hex: "#FFFFFF")!,
         label: RGBAColor(hex: "#000000")!,
         background: nil,
         accent: RGBAColor(hex: "#007AFF")!,
         keyShadow: RGBAColor(hex: "#898A8D")!,
-        pressedFunctionKey: RGBAColor(hex: "#FFFFFF")!
+        pressedFunctionKey: RGBAColor(hex: "#ABB0BA")!
     )
 
-    /// iOS-like dark keyboard.
+    /// The iPhone keyboard of iOS 26/27 in dark mode: every key #454545 on the #222222 glass, white
+    /// labels, no key shadows.
     public static let systemDark = KeyColorScheme(
-        characterKey: RGBAColor(hex: "#6B6B6B")!,
-        functionKey: RGBAColor(hex: "#464646")!,
+        characterKey: RGBAColor(hex: "#454545")!,
+        functionKey: RGBAColor(hex: "#454545")!,
         label: RGBAColor(hex: "#FFFFFF")!,
         background: nil,
         accent: RGBAColor(hex: "#0A84FF")!,

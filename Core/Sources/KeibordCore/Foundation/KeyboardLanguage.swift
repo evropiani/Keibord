@@ -200,3 +200,55 @@ public enum KeyboardLanguage: String, Codable, CaseIterable, Hashable, Sendable 
         }
     }
 }
+
+/// One Keibord keyboard in iOS Settings: each language is a keyboard of its own (Keibord Deutsch,
+/// English, Shqip, Italiano), switched with the globe key like Apple's keyboards. The regional variant
+/// (UK/US English, Albania/Kosovo) comes from the app's language list.
+public enum KeyboardLanguageFamily: String, Codable, CaseIterable, Hashable, Sendable {
+    case de, en, sq, it
+
+    public var variants: [KeyboardLanguage] {
+        switch self {
+        case .de: return [.deAT]
+        case .en: return [.enGB, .enUS]
+        case .sq: return [.sqAL, .sqXK]
+        case .it: return [.itIT]
+        }
+    }
+
+    /// The variant this keyboard types: the first one enabled in the app, else the first variant.
+    public func language(enabled: [KeyboardLanguage]) -> KeyboardLanguage {
+        enabled.first { $0.family == self } ?? variants[0]
+    }
+
+    /// The keyboard's name in iOS Settings and in the globe key's list.
+    public var keyboardName: String {
+        switch self {
+        case .de: return "Keibord Deutsch"
+        case .en: return "Keibord English"
+        case .sq: return "Keibord Shqip"
+        case .it: return "Keibord Italiano"
+        }
+    }
+}
+
+extension KeyboardLanguage {
+    public var family: KeyboardLanguageFamily {
+        switch self {
+        case .deAT: return .de
+        case .enGB, .enUS: return .en
+        case .sqAL, .sqXK: return .sq
+        case .itIT: return .it
+        }
+    }
+
+    /// Small label at the bottom right of the space bar, like Apple's "DE EN": the language codes of a
+    /// keyboard that types in more than one language; empty for a single language.
+    public static func spaceBarCodes(_ languages: [KeyboardLanguage]) -> String {
+        var codes: [String] = []
+        for code in languages.map({ $0.languageCode.uppercased() }) where !codes.contains(code) {
+            codes.append(code)
+        }
+        return codes.count > 1 ? codes.joined(separator: " ") : ""
+    }
+}

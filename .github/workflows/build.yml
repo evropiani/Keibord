@@ -62,9 +62,24 @@ jobs:
           # Ad-hoc sign with entitlements so sideloading tools register the app group.
           sed 's/$(KEIBORD_BUNDLE_ID)/com.keibord.app/g' Keyboard/KeibordKeyboard.entitlements > keyboard.entitlements
           sed 's/$(KEIBORD_BUNDLE_ID)/com.keibord.app/g' App/Keibord.entitlements > app.entitlements
-          codesign -f -s - --entitlements keyboard.entitlements Payload/Keibord.app/PlugIns/KeibordKeyboard.appex
+          # Inside out: the shared keyboard framework, every language keyboard, then the app.
+          for framework in Payload/Keibord.app/Frameworks/*.framework; do codesign -f -s - "$framework"; done
+          for appex in Payload/Keibord.app/PlugIns/*.appex; do
+            codesign -f -s - --entitlements keyboard.entitlements "$appex"
+            /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$appex/Info.plist"
+          done
           codesign -f -s - --entitlements app.entitlements Payload/Keibord.app
           codesign -d --entitlements - Payload/Keibord.app/PlugIns/KeibordKeyboard.appex
+          # Each keyboard must load the shared framework from the app (no copy of its own).
+          test -d Payload/Keibord.app/Frameworks/KeibordKeyboardKit.framework/Dictionaries
+          test "$(ls Payload/Keibord.app/PlugIns | wc -l)" -eq 4
+          for appex in Payload/Keibord.app/PlugIns/*.appex; do
+            test ! -d "$appex/Frameworks"
+            otool -L "$appex/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$appex/Info.plist")" | grep -q KeibordKeyboardKit.framework
+          done
+          # The keyboards' principal class (Info.plist: KeibordKeyboardKit.KeyboardViewController) is in it.
+          otool -ov Payload/Keibord.app/Frameworks/KeibordKeyboardKit.framework/KeibordKeyboardKit | grep -q _TtC18KeibordKeyboardKit22KeyboardViewController
+          du -sh Payload/Keibord.app Payload/Keibord.app/Frameworks/* Payload/Keibord.app/PlugIns/*
           zip -qry Keibord.ipa Payload
           ls -lh Keibord.ipa
       - uses: actions/upload-artifact@v4
