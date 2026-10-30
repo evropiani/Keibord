@@ -234,7 +234,7 @@ struct AppearanceView: View {
                 Toggle("Key Shadows", isOn: $model.settings.appearance.keyShadows)
                 Toggle("Always Show Upper-Case Letters", isOn: $model.settings.appearance.uppercaseLabels)
                 Toggle("Number Row", isOn: $model.settings.appearance.showNumberRow)
-                Toggle("Languages on Space Bar", isOn: $model.settings.appearance.showSpaceLanguageLabel)
+                Toggle("Language on Space Bar", isOn: $model.settings.appearance.showSpaceLanguageLabel)
             }
             Section {
                 Button("Reset to iPhone Look") {
@@ -410,10 +410,12 @@ struct KeyboardPreview: View {
             RoundedRectangle(cornerRadius: CGFloat(settings.appearance.keyCornerRadius))
                 .fill(Color(fill))
                 .shadow(color: settings.appearance.keyShadows ? Color(colors.keyShadow) : .clear, radius: 0, x: 0, y: 1)
-            if let symbol = iconName(key) {
+            if key.id == "emoji", let face = KeyboardIcons.emojiFace(diameter: 16 * settings.appearance.labelScale, filled: dark) {
+                Image(uiImage: face).renderingMode(.template).foregroundStyle(Color(labelColor))
+            } else if let symbol = iconName(key) {
                 Image(systemName: symbol).foregroundStyle(Color(labelColor))
             } else if key.id == "space" {
-                // Like Apple's space bar: no word, the languages small in the corner ("DE EN").
+                // Like Apple's space bar: no word, the keyboard's language small in the corner ("DE").
                 Text(spaceCodes)
                     .font(.system(size: 10.5 * settings.appearance.labelScale).width(.condensed))
                     .foregroundStyle(Color(labelColor).opacity(dark ? 0.4 : 0.25))
@@ -430,11 +432,8 @@ struct KeyboardPreview: View {
         }
     }
 
-    /// The languages a keyboard of `language` types in (its own, then the other enabled ones).
     private var spaceCodes: String {
-        guard settings.appearance.showSpaceLanguageLabel else { return "" }
-        let others = settings.multilingualTyping ? settings.activeLanguages.filter { $0.family != language.family } : []
-        return KeyboardLanguage.spaceBarCodes([language] + others)
+        settings.appearance.showSpaceLanguageLabel ? language.spaceBarCode : ""
     }
 
     private func baseFill(_ key: KeySpec, colors: KeyColorScheme) -> RGBAColor {

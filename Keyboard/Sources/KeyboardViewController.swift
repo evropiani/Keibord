@@ -126,6 +126,14 @@ final class KeyboardViewController: UIInputViewController {
     private static let unlockLifetime: TimeInterval = 180
     /// Learned words/bigrams reach the engine after this much typing pause.
     private static let engineRefreshDelay: TimeInterval = 2
+    /// Emoji uses are written this long after the last one: they used to wait for the keyboard to close,
+    /// which iOS often skips (an app switch right after sending), and the recents lost them.
+    private static let emojiFlushDelay: TimeInterval = 2
+    /// How long the space bar shows the language name once the keyboard is on screen (Apple's: 0.75 s).
+    private static let spaceNameDuration: TimeInterval = 0.75
+    private var emojiFlushToken = 0
+    /// Observers of the host app going to the background (see `observeHostApp`).
+    private var hostObservers: [NSObjectProtocol] = []
 
     // MARK: Lifecycle
 
@@ -185,6 +193,22 @@ final class KeyboardViewController: UIInputViewController {
         for delay in [1.0, 2.0, 4.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.checkShownAfterLoading(delay) }
         }
+        observeHostApp()
+    }
+
+    /// Writes what was learned when the app using the keyboard goes to the background: iOS then often
+    /// suspends (and later ends) the keyboard without viewWillDisappear, and the unwritten learning,
+    /// emoji recents included, was lost.
+    private func observeHostApp() {
+        #if os(iOS)
+        for name in [Notification.Name.NSExtensionHostWillResignActive, .NSExtensionHostDidEnterBackground] {
+            hostObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                guard let self = self else { return }
+                self.flushLearning()
+                self.finishWritesBeforeSuspension()
+            })
+        }
+        #endif
     }
 
     /// iOS loaded a keyboard and then never announced it (no viewWillAppear/viewDidAppear): it stayed
@@ -198,6 +222,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     deinit {
+        hostObservers.forEach { NotificationCenter.default.removeObserver($0) }
         MainThreadWatchdog.shared.stop(for: self)
         KeyboardLog.shared.add("controller released")
     }
@@ -314,6 +339,11 @@ final class KeyboardViewController: UIInputViewController {
         if startsOnNumbersPage { controller.handle(.switchPage(.numbers)) }
         writeState()
         render()
+        // Like Apple's keyboard: the language's name on the space bar while it appears (fades in viewDidAppear).
+        if settings.appearance.showSpaceLanguageLabel, mode == .keys {
+            keyboardView.showSpaceName(controller.language.languageName)
+            fadeOutSpaceName(after: Self.spaceNameDuration + 0.75) // should iOS never send viewDidAppear
+        }
         view.alpha = 1
         scheduleEngineRefresh()
         KeyboardLog.shared.add("appear: \(controller.field.kind) field, full access \(fullAccess ? "on" : "off"), view \(Self.sizeText(view.bounds.size)), "
@@ -334,6 +364,16 @@ final class KeyboardViewController: UIInputViewController {
         appeared = true
         KeyboardLog.shared.add("on screen: view \(Self.sizeText(view.bounds.size)), window \(Self.sizeText(view.window?.bounds.size ?? .zero))")
         checkAfterAppearing()
+        fadeOutSpaceName(after: Self.spaceNameDuration)
+    }
+
+    /// Fades the space bar's language name out `seconds` from now, unless the keyboard appeared again since.
+    private func fadeOutSpaceName(after seconds: TimeInterval) {
+        let appearance = appearanceCount
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self = self, self.appearanceCount == appearance else { return }
+            self.keyboardView.fadeOutSpaceName()
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -344,6 +384,7 @@ final class KeyboardViewController: UIInputViewController {
         KeyboardLog.shared.add("close")
         // A held backspace must not keep deleting once the keyboard goes away.
         keyboardView.cancelAllTouches()
+        keyboardView.fadeOutSpaceName(animated: false)
         if emojiPanelAdded { emojiPanel.stopBackspaceRepeat() }
         cancelEngineRefresh()
         // The main thread never waits for the file here: a write stuck behind another process kept the
@@ -357,6 +398,8 @@ final class KeyboardViewController: UIInputViewController {
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
         KeyboardLog.shared.add("memory warning (memory \(KeyboardDiagnostics.memoryDescription))")
+        // iOS may end the keyboard next: write what was learned first.
+        flushLearning()
         layoutCache.removeAll()
         if mode != .emoji, mode != .emojiSearch { releaseEmojiSearchData(force: true) }
     }
@@ -727,8 +770,8 @@ final class KeyboardViewController: UIInputViewController {
 
         if mode == .keys || searching {
             let offsets = touchOffsets(for: layout)
-            // Like Apple's space bar: no word, only the languages ("DE EN") when it types in more than one.
-            let spaceLabel = settings.appearance.showSpaceLanguageLabel ? KeyboardLanguage.spaceBarCodes(controller.languages) : ""
+            // Like Apple's space bar: no word, only this keyboard's language in the corner ("DE").
+            let spaceLabel = settings.appearance.showSpaceLanguageLabel ? controller.language.spaceBarCode : ""
             // The return key is dimmed (and inactive) only when both the field and the context agree it is empty.
             let empty = !proxyConnected || !textDocumentProxy.hasText && (textDocumentProxy.documentContextBeforeInput ?? "").isEmpty
                 && (textDocumentProxy.documentContextAfterInput ?? "").isEmpty
@@ -952,8 +995,21 @@ final class KeyboardViewController: UIInputViewController {
         sessionEmoji.removeAll { $0 == emoji }
         sessionEmoji.insert(emoji, at: 0)
         // Incognito pauses all learning, emoji recents included (they stay for this session only).
-        if !settings.incognito { noteLearning(.usedEmoji(emoji)) }
+        if !settings.incognito {
+            noteLearning(.usedEmoji(emoji))
+            scheduleEmojiFlush()
+        }
         playFeedback(sound: 1104)
+    }
+
+    /// Writes the emoji uses shortly after the last one (see `emojiFlushDelay`).
+    private func scheduleEmojiFlush() {
+        emojiFlushToken += 1
+        let token = emojiFlushToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.emojiFlushDelay) { [weak self] in
+            guard let self = self, self.emojiFlushToken == token else { return }
+            self.flushLearning()
+        }
     }
 
     private func updateEmojiSearch(_ query: String) {
@@ -1203,6 +1259,7 @@ extension KeyboardViewController: EmojiPanelDelegate {
     }
 
     func emojiPanelDidTapABC(_ panel: EmojiPanelView) {
+        flushLearning() // the emoji just used reach the recents of every keyboard
         mode = .keys
         releaseEmojiSearchData()
         controller.refreshSuggestions()

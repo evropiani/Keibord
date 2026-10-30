@@ -63,10 +63,13 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual(KeyboardLanguageFamily.en.language(enabled: [.deAT]), .enGB)
     }
 
-    func testSpaceBarCodesLikeApple() {
-        XCTAssertEqual(KeyboardLanguage.spaceBarCodes([.deAT, .enGB]), "DE EN")
-        XCTAssertEqual(KeyboardLanguage.spaceBarCodes([.deAT]), "", "one language: nothing, like Apple's keyboard")
-        XCTAssertEqual(KeyboardLanguage.spaceBarCodes([.enGB, .enUS]), "", "variants of one language count once")
-        XCTAssertEqual(KeyboardLanguage.spaceBarCodes([.sqXK, .deAT, .itIT]), "SQ DE IT")
+    func testSpaceBarShowsTheKeyboardsOwnLanguage() {
+        XCTAssertEqual(KeyboardLanguage.deAT.spaceBarCode, "DE")
+        XCTAssertEqual(KeyboardLanguage.enUS.spaceBarCode, "EN")
+        XCTAssertEqual(KeyboardLanguage.sqXK.spaceBarCode, "SQ")
+        XCTAssertEqual(KeyboardLanguage.deAT.languageName, "Deutsch")
+        XCTAssertEqual(KeyboardLanguage.enGB.languageName, "English")
+        XCTAssertEqual(KeyboardLanguage.sqAL.languageName, "Shqip")
+        XCTAssertEqual(KeyboardLanguage.itIT.languageName, "Italiano")
     }
 }

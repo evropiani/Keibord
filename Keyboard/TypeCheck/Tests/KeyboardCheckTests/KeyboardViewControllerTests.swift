@@ -391,42 +391,91 @@ final class KeyboardViewControllerTests: XCTestCase {
     }
 
     /// Each language is its own iOS keyboard: no language key (it sat next to the emoji key and was hit
-    /// instead of it); the space bar shows the languages like Apple's ("EN DE"), no word.
-    func testALanguageKeyboardHasNoLanguageKeyAndShowsItsLanguagesOnTheSpaceBar() {
+    /// instead of it). Like Apple's space bar: the language's name in the middle while the keyboard
+    /// appears, then only this keyboard's language small in the corner ("EN"), never the others'.
+    func testALanguageKeyboardHasNoLanguageKeyAndShowsItsLanguageOnTheSpaceBar() {
         var settings = KeibordSettings()
-        settings.enabledLanguages = [.deAT, .enUS]
+        settings.enabledLanguages = [.deAT, .enUS, .sqXK]
         start(settings: settings, family: .en)
         XCTAssertEqual(keyboard.layout?.language, .enUS, "the English keyboard, in the variant chosen in the app")
         XCTAssertNil(keyView("language"))
         XCTAssertNotNil(keyView("emoji"))
         XCTAssertNil(keyView("ü"), "QWERTY without the German letters")
-        let space = keyView("space")
-        XCTAssertNil(space?.label.text)
-        XCTAssertEqual(space?.cornerLabel?.text, "EN DE")
+        XCTAssertTrue(keyboard.spaceNameShown)
+        XCTAssertEqual(keyboard.spaceNameLabel.text, "English")
+        XCTAssertEqual(keyboard.spaceNameLabel.alpha, 1)
+        XCTAssertNil(keyView("space")?.cornerLabel?.text, "no corner code while the name shows")
+        XCTAssertNil(keyView("space")?.label.text)
+        wait(0.9)
+        XCTAssertFalse(keyboard.spaceNameShown, "the name fades after 0.75 s, like Apple's")
+        XCTAssertEqual(keyboard.spaceNameLabel.alpha, 0)
+        XCTAssertEqual(keyView("space")?.cornerLabel?.text, "EN", "only this keyboard's language")
         send(.nextLanguage)
         XCTAssertEqual(keyboard.layout?.language, .enUS, "nothing switches the language inside a language keyboard")
         vc.viewWillDisappear(false)
 
-        settings.multilingualTyping = false
         start(settings: settings, family: .de)
+        XCTAssertEqual(keyboard.spaceNameLabel.text, "Deutsch")
         XCTAssertEqual(keyboard.layout?.language, .deAT)
         XCTAssertNotNil(keyView("ü"))
-        XCTAssertNil(keyView("space")?.cornerLabel?.text, "one language: a plain space bar, like Apple's")
+        vc.viewWillDisappear(false)
+        XCTAssertFalse(keyboard.spaceNameShown, "gone when the keyboard closes")
+        XCTAssertEqual(keyView("space")?.cornerLabel?.text, "DE")
+
+        // iOS sometimes never sends viewDidAppear: the name still goes.
+        vc = KeyboardViewController()
+        vc.languageFamily = .it
+        vc.testProxy = TestProxy()
+        vc.viewDidLoad()
+        vc.viewWillAppear(false)
+        XCTAssertEqual(keyboard.spaceNameLabel.text, "Italiano")
+        wait(1.7)
+        XCTAssertFalse(keyboard.spaceNameShown)
+        vc.viewWillDisappear(false)
+
+        settings.appearance.showSpaceLanguageLabel = false
+        start(settings: settings, family: .sq)
+        XCTAssertFalse(keyboard.spaceNameShown)
+        XCTAssertNil(keyView("space")?.cornerLabel?.text)
         vc.viewWillDisappear(false)
     }
 
     /// Without a language of its own (an older single keyboard) the language key still switches.
     func testAKeyboardWithoutALanguageSwitchesWithTheLanguageKey() {
         start()
+        keyboard.fadeOutSpaceName(animated: false)
         XCTAssertNotNil(keyView("language"))
-        XCTAssertEqual(keyView("space")?.cornerLabel?.text, "DE EN")
+        XCTAssertEqual(keyView("space")?.cornerLabel?.text, "DE")
         send(.nextLanguage)
         XCTAssertEqual(keyboard.layout?.language, .enGB)
-        XCTAssertEqual(keyView("space")?.cornerLabel?.text, "EN DE")
+        XCTAssertEqual(keyView("space")?.cornerLabel?.text, "EN")
         XCTAssertNotNil(keyView("y"))
         send(.selectLanguage(.deAT))
         XCTAssertEqual(keyboard.layout?.language, .deAT)
         XCTAssertNotNil(keyView("ü"))
+    }
+
+    /// Emoji used to wait for the keyboard to close before they were written, and iOS often ends a
+    /// keyboard without closing it (an app switch right after sending): the recents lost them.
+    func testUsedEmojiAreWrittenSoonWithoutTheKeyboardClosing() {
+        start(fullAccess: true)
+        send(.emoji)
+        let panel = subview(EmojiPanelView.self)!
+        vc.emojiPanel(panel, didSelect: "😀")
+        vc.emojiPanel(panel, didSelect: "🙈")
+        vc.waitForPendingWrites()
+        XCTAssertNil(KeibordStore.shared.loadUserModel().emoji["😀"], "not at once: a row of emoji is one write")
+        wait(2.2)
+        vc.waitForPendingWrites()
+        let saved = KeibordStore.shared.loadUserModel()
+        XCTAssertEqual(saved.emoji["😀"]?.count, 1)
+        XCTAssertEqual(saved.emoji["🙈"]?.count, 1)
+        XCTAssertEqual(saved.emojiRecents.first, "🙈")
+        vc.emojiPanel(panel, didSelect: "👍")
+        vc.emojiPanelDidTapABC(panel)
+        vc.waitForPendingWrites()
+        XCTAssertEqual(KeibordStore.shared.loadUserModel().emoji["👍"]?.count, 1, "leaving the emoji panel writes them too")
+        vc.viewWillDisappear(false)
     }
 
     /// The iOS 26/27 look: function keys in the letter keys' colour, no shadows, a pressed key turns grey.

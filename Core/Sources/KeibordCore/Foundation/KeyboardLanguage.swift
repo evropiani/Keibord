@@ -242,13 +242,17 @@ extension KeyboardLanguage {
         }
     }
 
-    /// Small label at the bottom right of the space bar, like Apple's "DE EN": the language codes of a
-    /// keyboard that types in more than one language; empty for a single language.
-    public static func spaceBarCodes(_ languages: [KeyboardLanguage]) -> String {
-        var codes: [String] = []
-        for code in languages.map({ $0.languageCode.uppercased() }) where !codes.contains(code) {
-            codes.append(code)
+    /// Small label at the bottom right of the space bar ("DE" on the German keyboard), like Apple's.
+    public var spaceBarCode: String { languageCode.uppercased() }
+
+    /// The language's name without the region, shown on the space bar for a moment when the keyboard
+    /// appears ("Deutsch", "English"), like Apple's keyboard.
+    public var languageName: String {
+        switch family {
+        case .de: return "Deutsch"
+        case .en: return "English"
+        case .sq: return "Shqip"
+        case .it: return "Italiano"
         }
-        return codes.count > 1 ? codes.joined(separator: " ") : ""
     }
 }

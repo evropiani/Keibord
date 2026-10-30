@@ -335,6 +335,18 @@ open class UIView: UIResponder {
         children.insert(view, at: min(max(index, 0), children.count))
     }
     open func sizeThatFits(_ size: CGSize) -> CGSize { bounds.size }
+    public struct AnimationOptions: OptionSet {
+        public let rawValue: UInt
+        public init(rawValue: UInt) { self.rawValue = rawValue }
+        public static let beginFromCurrentState = AnimationOptions(rawValue: 1 << 2)
+        public static let curveEaseOut = AnimationOptions(rawValue: 2 << 16)
+    }
+    /// Runs the animation block at once and completes (no render server on Linux).
+    open class func animate(withDuration duration: TimeInterval, delay: TimeInterval, options: AnimationOptions,
+                            animations: @escaping () -> Void, completion: ((Bool) -> Void)?) {
+        animations()
+        completion?(true)
+    }
     open func setNeedsLayout() { needsLayout = true }
     open func setNeedsUpdateConstraints() {}
     open func layoutIfNeeded() {

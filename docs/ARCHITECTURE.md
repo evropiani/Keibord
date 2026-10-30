@@ -479,7 +479,10 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   / `textDidChange` → `controller.documentDidChange()` and re-derive the field context (the focused
   field can change). `viewWillDisappear` → flush learning delta in the background
   (`performExpiringActivity` keeps the extension running until the write is done; the main thread
-  never waits for a file). Flush also every 25 committed words.
+  never waits for a file). Flush also every 25 committed words, 2 s after the last emoji, when leaving
+  the emoji panel, on a memory warning and when the host app resigns active or enters the background
+  (`NSExtensionHostWillResignActive`/`DidEnterBackground`): iOS often ends a keyboard without
+  viewWillDisappear.
   Nothing is read from `textDocumentProxy` (and `needsInputModeSwitchKey`) before iOS connects the
   field (`proxyConnected`: viewWillAppear or textDidChange): reading `documentIdentifier` while
   loading crashed the keyboard (1.0.14). The field is configured in viewWillAppear.
@@ -542,9 +545,11 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
 * **KeyView**: rounded rect (`settings.appearance.keyCornerRadius`), optional 1-pt bottom shadow
   (off by default, as on iOS 26), label sizes of the iOS 26/27 keyboard measured from screenshots
   (letters 24.5 pt × labelScale, "123"/words 18 pt, icons ≈ 19 pt) or SF Symbol icons
-  (`shift`, `shift.fill`, `capslock.fill`, `delete.left`, `globe`, `face.smiling`, `return`).
-  The space bar has no word, only Apple's small condensed language codes at the bottom right ("DE EN")
-  when the keyboard types in more than one language (`KeyboardLanguage.spaceBarCodes`).
+  (`shift`, `shift.fill`, `capslock.fill`, `delete.left`, `globe`, `return`).
+  The space bar has no word: when the keyboard appears it shows the language's name in the middle
+  (`KeyboardLanguage.languageName`, 18 pt) for 0.75 s and fades it out in 0.2 s, like Apple's; then
+  only the keyboard's own language small and condensed at the bottom right ("DE", `spaceBarCode`).
+  The emoji key is Apple's grinning face (`KeyboardIcons.emojiFace`, outlined; filled on dark keys).
   Default colours = the iOS 26/27 keyboard: every key white (#FFFFFF) on light glass, #454545 on dark
   glass (#222222), function keys like letter keys; a pressed key without a preview turns grey.
   Colours from `appearance.colors(dark:)` where dark = theme `.dark`, or `.system` and

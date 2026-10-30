@@ -44,6 +44,8 @@ struct KeyContent: Equatable {
     var symbol: String?
     var symbolSize: CGFloat = 0
     var symbolWeight: UIImage.SymbolWeight = .regular
+    /// Filled variant of a drawn icon (the emoji face on dark keys, like Apple's).
+    var symbolFilled = false
     /// Small text in the bottom right corner (the space bar's "DE EN", like Apple's keyboard).
     var cornerText: String?
     var cornerFontSize: CGFloat = 0
@@ -103,12 +105,8 @@ final class KeyView: UIView {
         if c.fontSize != old?.fontSize || c.fontWeight != old?.fontWeight {
             label.font = .systemFont(ofSize: max(c.fontSize, 1), weight: c.fontWeight)
         }
-        if c.symbol != old?.symbol || c.symbolSize != old?.symbolSize || c.symbolWeight != old?.symbolWeight {
-            if let name = c.symbol {
-                icon.image = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: c.symbolSize, weight: c.symbolWeight))
-            } else {
-                icon.image = nil
-            }
+        if c.symbol != old?.symbol || c.symbolSize != old?.symbolSize || c.symbolWeight != old?.symbolWeight || c.symbolFilled != old?.symbolFilled {
+            icon.image = c.symbol.flatMap { KeyboardIcons.image(named: $0, pointSize: c.symbolSize, weight: c.symbolWeight, filled: c.symbolFilled) }
         }
         if c.cornerText != old?.cornerText || c.cornerFontSize != old?.cornerFontSize {
             if c.cornerText != nil, cornerLabel == nil {
@@ -167,6 +165,9 @@ final class KeyboardView: UIView {
     private var theme: KeyboardTheme?
     private var shiftState: ShiftState = .off
     private var spaceLabel = ""
+    /// The language name in the middle of the space bar while the keyboard appears (like Apple's).
+    let spaceNameLabel = UILabel()
+    private(set) var spaceNameShown = false
     private var returnEnabled = true
     private var prominentReturn = false
     private var touchOffsets: [String: (dx: Double, dy: Double)] = [:]
@@ -233,9 +234,50 @@ final class KeyboardView: UIView {
         backgroundColor = .touchableClear // touches in the gaps between keys reach the nearest key
         popup.isHidden = true
         callout.isHidden = true
+        spaceNameLabel.textAlignment = .center
+        spaceNameLabel.isUserInteractionEnabled = false
+        spaceNameLabel.alpha = 0
+        addSubview(spaceNameLabel)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // MARK: Space bar name
+
+    /// Shows the language name in the middle of the space bar (Apple's keyboard does so for a moment when
+    /// it appears); `fadeOutSpaceName` then leaves only the code in the corner.
+    func showSpaceName(_ name: String) {
+        spaceNameLabel.text = name
+        spaceNameLabel.alpha = 1
+        spaceNameShown = true
+        positionSpaceName()
+        refreshAppearance()
+    }
+
+    /// Fades the name out like Apple's (0.2 s), then the corner code appears.
+    func fadeOutSpaceName(animated: Bool = true) {
+        guard spaceNameShown else { return }
+        let finish = { [weak self] in
+            guard let self = self else { return }
+            self.spaceNameShown = false
+            self.spaceNameLabel.alpha = 0
+            self.refreshAppearance()
+        }
+        guard animated else { finish(); return }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .beginFromCurrentState], animations: {
+            self.spaceNameLabel.alpha = 0
+        }, completion: { _ in finish() })
+    }
+
+    private func positionSpaceName() {
+        guard let space = frames.first(where: { $0.key.id == "space" }) else {
+            spaceNameLabel.isHidden = true
+            return
+        }
+        spaceNameLabel.isHidden = false
+        spaceNameLabel.frame = space.rect.insetBy(dx: 6, dy: 0)
+        bringSubviewToFront(spaceNameLabel)
+    }
 
     // MARK: Configuration
 
@@ -305,6 +347,7 @@ final class KeyboardView: UIView {
         }
         if popup.superview == nil { addSubview(popup) }
         if callout.superview == nil { addSubview(callout) }
+        positionSpaceName()
         bringSubviewToFront(popup)
         bringSubviewToFront(callout)
         refreshAppearance()
@@ -347,6 +390,11 @@ final class KeyboardView: UIView {
 
     func refreshAppearance() {
         guard let theme = theme else { return }
+        if spaceNameShown, let space = frames.first(where: { $0.key.id == "space" }) {
+            // In the label colour, 18 pt like the words of the bottom row (Apple's size).
+            spaceNameLabel.font = .systemFont(ofSize: 18 * theme.labelScale)
+            spaceNameLabel.textColor = theme.labelColor(space.key, prominentReturn: false)
+        }
         let labelAlpha: CGFloat = trackpadActive ? 0 : 1
         for (index, view) in keyViews {
             guard frames.indices.contains(index) else { continue }
@@ -358,6 +406,8 @@ final class KeyboardView: UIView {
             if view.label.alpha != labelAlpha { view.label.alpha = labelAlpha }
             if view.icon.alpha != labelAlpha { view.icon.alpha = labelAlpha }
             if let corner = view.cornerLabel, corner.alpha != labelAlpha { corner.alpha = labelAlpha }
+            // The space bar turned into a trackpad: its name goes at once.
+            if trackpadActive, spaceNameShown, key.id == "space" { spaceNameShown = false; spaceNameLabel.alpha = 0 }
         }
     }
 
@@ -387,14 +437,16 @@ final class KeyboardView: UIView {
         case "backspace":
             return KeyContent(symbol: "delete.left", symbolSize: 19 * scale)
         case "emoji":
-            return KeyContent(symbol: "face.smiling", symbolSize: 20 * scale)
+            // Apple's grinning face (outlined, filled on dark keys), 18.6 pt like on iOS 26.
+            return KeyContent(symbol: KeyboardIcons.emojiSymbol, symbolSize: 18.6 * scale, symbolFilled: theme.isDark)
         case "globe":
             return KeyContent(symbol: "globe", symbolSize: 19 * scale)
         case "return" where key.label.isEmpty:
             return KeyContent(symbol: "return", symbolSize: 19 * scale)
         case "space":
-            // Apple's space bar has no word on it, only the languages of a multilingual keyboard.
-            return KeyContent(cornerText: spaceLabel.isEmpty ? nil : spaceLabel, cornerFontSize: 12.5 * scale)
+            // Apple's space bar has no word on it, only the language in its corner ("DE"); the name shows
+            // in the middle for a moment when the keyboard appears (`showSpaceName`), the corner then empty.
+            return KeyContent(cornerText: spaceLabel.isEmpty || spaceNameShown ? nil : spaceLabel, cornerFontSize: 12.5 * scale)
         default:
             break
         }
