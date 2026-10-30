@@ -466,6 +466,14 @@ Compiled into both targets (no framework). UIKit/CryptoKit/Security/CommonCrypto
 6. **`PasswordBackupCipher: BackupCipher`** — PBKDF2-SHA256 via `CCKeyDerivationPBKDF`, AES-GCM via CryptoKit.
 7. **Colour bridging**: `RGBAColor.uiColor`, `RGBAColor(uiColor:)`, SwiftUI `Color(rgba:)`.
 8. **`KeibordVersion`**: marketing version/build from `Bundle.main`.
+9. **`StickerStore`**: the saved stickers. `stickers.json` (`StickerIndex`, Core: entries in the order
+   added, one per image (`contentKey`: Apple's content identifier or an FNV-1a hash), at most 500)
+   and the `Stickers/` folder next to it: `<id>.png` (≤ 320 px, pasted), `<id>-small.png` (≤ 150 px,
+   the keyboard's grid) and `<id>.glyph` (Apple's adaptive image glyph data). The app adds
+   (`add(_ capture:)`: the largest image of the glyph's data via ImageIO, scaled PNGs, then a
+   coordinated append) and deletes; the keyboard reads and copies: the pasteboard item holds a PNG
+   and, on iOS 18+, flat RTFD with the adaptive image glyph, so apps that take Apple's stickers
+   (Messages, Notes) paste it like one.
 
 ## 10. Keyboard extension (Keyboard/) — work package G
 
@@ -539,7 +547,11 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   above the keyboard). Backspace: delete on touch-down, repeat after 0.5 s every 0.09 s, switch to
   word mode after 1.2 s. Shift: tap / double-tap within 0.3 s → caps lock; its release (also cancelled) → `.shiftReleased`. Space: tap inserts; long
   press (0.4 s, when `settings.spacebarCursor`) → trackpad mode (key labels fade), horizontal drag of
-  ~9 pt per character → `.moveCursor`. The language key (tap → next language, long-press → list)
+  ~9 pt per character → `.moveCursor`. Page keys ("123", "ABC", "#+=") switch the page when touched,
+  like Apple's: while one is held, other fingers type on the new page and releasing it after typing
+  (held ≥ 0.3 s) goes back to the page it came from; sliding from it onto a key types that key and goes
+  back; a tap, or a press overlapping fast typing, stays on the new page. The held key survives the
+  layout change of its own switch (`cancelAllTouches(keepingPageKeys:)`). The language key (tap → next language, long-press → list)
   only exists without a `KeyboardLanguageFamily` (tests); the language keyboards have none.
   Globe: `handleInputModeList(from:with:)` via `addTarget` for all touch events. Emoji key → emoji panel.
 * **KeyView**: rounded rect (`settings.appearance.keyCornerRadius`), optional 1-pt bottom shadow
@@ -561,12 +573,18 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   replace word suggestions in matching fields. In one-time-code fields (when
   `settings.oneTimeCodeHint`) show an action chip "Codes from Messages → iOS keyboard" that calls
   `advanceToNextInputMode()`. Without Full Access show a one-line hint (tap → instructions).
-* **EmojiPanelView**: replaces the key area. Horizontal paging `UICollectionView` with sections per
-  category (recents first), category bar at the bottom (`ABC` button, SF Symbol category icons:
-  `clock`, `face.smiling`, `pawprint`, `fork.knife`, `basketball`, `car`, `lightbulb`,
-  `music.note`/`heart`, `flag`), backspace on the right. Long-press an emoji with variants → skin-tone
-  picker. Search field at the top: tapping it shows the letters layout with the search query
-  above it (keys go to the query, not the document), results row of matching emojis.
+* **EmojiPanelView**: replaces the key area. Horizontal `UICollectionView` with Apple's iOS 26/27 grid
+  measured from screenshots: 55 pt cells (four rows on an iPhone, centred in the grid's height), 38 pt
+  emoji, the first column 7 pt from the edge, 22 pt between sections. Sections: the saved stickers
+  (if any), the favourite emoji (`settings.favoriteEmoji`, at most 8, in their order), the recents
+  (without the favourites), then the categories. It opens on the recents page (`showRecentsPage`);
+  the stickers are to its left, like Apple's. Category bar at the bottom (`ABC` button, SF Symbol
+  icons: `photo.stack` for stickers, `clock` for favourites + recents, `face.smiling`, `pawprint`,
+  `fork.knife`, `soccerball`, `car`, `lightbulb`, `heart`, `flag`), backspace on the right. Long-press
+  an emoji with variants → skin-tone picker. Tapping a sticker copies it (`StickerStore.copyToPasteboard`,
+  needs Full Access; a keyboard cannot insert images) and a note says to paste it. Search field at the
+  top: tapping it shows the letters layout with the search query above it (keys go to the query, not
+  the document), results row of matching emojis (favourites and recents while the query is empty).
 * **CardUnlockView**: appears when a card chip is tapped for a card with `requiresCVV`: title
   ("CVV for Visa •••• 1234"), dots, own numeric keypad, cancel. On success insert the value for the
   focused field kind (number → digits only, expiration → "MM/YY", month → "MM", year → "YY" or
@@ -594,6 +612,13 @@ SwiftUI, `NavigationStack` + `List`. Tabs: **Keyboard** (home), **Settings**, **
   iOS default), **tinted keys editor**: an interactive SwiftUI keyboard preview (built from
   `LayoutFactory` + `LayoutGeometry` exactly like the keyboard) — tap keys to select one or many,
   pick a colour, apply/remove; list of tinted keys with swatches. Live preview everywhere.
+* **Emoji & Stickers**: Favourite Emoji (up to 8: type or tap emoji into a field with any keyboard,
+  drag to sort, swipe to remove; always in edit mode). Stickers: keyboards cannot read the iPhone's
+  stickers, so the app keeps copies: a rich `UITextView` (`supportsAdaptiveImageGlyph` on iOS 18+)
+  takes stickers tapped in Apple's emoji keyboard; each change saves every adaptive image glyph (or
+  image attachment) at once (`AppModel.addSticker` → `StickerStore`, in the background) and empties
+  the field for the next one; other text is dropped with a hint. Grid of the saved stickers (hold →
+  Delete), Delete All.
 * **Dictionary**: learned words (search, sort by count/recent, swipe to delete, add word), blocked
   words (add/remove), statistics (word count, bigram count, touch samples). Edits go through
   `KeibordStore.updateUserModel`.
