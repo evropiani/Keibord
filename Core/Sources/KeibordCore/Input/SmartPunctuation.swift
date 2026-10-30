@@ -154,9 +154,5 @@ enum SmartPunctuation {
         return isEmoji(p)
     }
 
-    static func isEmoji(_ c: Character) -> Bool {
-        let scalars = c.unicodeScalars
-        if scalars.contains(where: { $0.properties.isEmojiPresentation }) { return true }
-        return scalars.count > 1 && scalars.contains(where: { $0.value == 0xFE0F || $0.value == 0x20E3 })
-    }
+    static func isEmoji(_ c: Character) -> Bool { EmojiText.isEmoji(c) }
 }

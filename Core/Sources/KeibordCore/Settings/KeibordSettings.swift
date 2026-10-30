@@ -131,6 +131,23 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
     // MARK: Appearance
     public var appearance: AppearanceSettings = AppearanceSettings()
 
+    // MARK: Emoji
+    /// Favourite emoji, pinned first on the emoji panel's recents page in this order (at most
+    /// `maxFavoriteEmoji`: two columns of the four-row grid).
+    public var favoriteEmoji: [String] = [] {
+        didSet { favoriteEmoji = Self.cleanedFavorites(favoriteEmoji) }
+    }
+    public static let maxFavoriteEmoji = 8
+
+    /// Emoji only, each once, at most `maxFavoriteEmoji`.
+    public static func cleanedFavorites(_ list: [String]) -> [String] {
+        var result: [String] = []
+        for e in list where !result.contains(e) && EmojiText.isEmoji(e) && result.count < maxFavoriteEmoji {
+            result.append(e)
+        }
+        return result
+    }
+
     public init() {}
 
     public func baseLayout(for language: KeyboardLanguage) -> BaseLayout {
@@ -154,7 +171,7 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
         case autocorrect, autoCapitalization, predictiveText, doubleSpacePeriod, smartQuotes, smartPunctuationSpacing
         case accentRestoration, capsLock, spacebarCursor, learnWords, incognito, adaptiveTouch, predictiveTouch
         case autofillSuggestions, cardSuggestions, oneTimeCodeHint
-        case haptics, keySound, keyPopups, appearance
+        case haptics, keySound, keyPopups, appearance, favoriteEmoji
     }
 
     public init(from decoder: Decoder) throws {
@@ -193,6 +210,8 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
         keySound = c.value(.keySound, default: d.keySound)
         keyPopups = c.value(.keyPopups, default: d.keyPopups)
         appearance = c.value(.appearance, default: d.appearance)
+        // didSet does not run in an initialiser: cleaned here (emoji only, each once, at most 8).
+        favoriteEmoji = Self.cleanedFavorites(c.lossyArray(.favoriteEmoji, default: d.favoriteEmoji))
         // Version 1 had key shadows on by default; iOS 26 keys have none.
         if version < 2 { appearance.keyShadows = false }
         version = max(version, Self.currentVersion)
@@ -225,6 +244,7 @@ public struct KeibordSettings: Codable, Equatable, Sendable {
         try c.encode(keySound, forKey: .keySound)
         try c.encode(keyPopups, forKey: .keyPopups)
         try c.encode(appearance, forKey: .appearance)
+        try c.encode(favoriteEmoji, forKey: .favoriteEmoji)
     }
 }
 

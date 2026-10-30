@@ -950,6 +950,26 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: Emoji
 
+    /// What tapping a sticker did, in the keyboard's language.
+    private enum StickerNote { case copied, fullAccess, failed }
+
+    private func stickerNote(_ note: StickerNote) -> String {
+        switch (note, controller.language.languageCode) {
+        case (.copied, "de"): return "Kopiert – im Textfeld „Einsetzen“ wählen"
+        case (.copied, "sq"): return "U kopjua – prek fushën e tekstit dhe ngjite"
+        case (.copied, "it"): return "Copiato – tocca il campo di testo e scegli Incolla"
+        case (.copied, _): return "Copied – tap the text field and choose Paste"
+        case (.fullAccess, "de"): return "Für Sticker „Vollen Zugriff erlauben“ einschalten"
+        case (.fullAccess, "sq"): return "Për ngjitëset aktivizo „Allow Full Access“"
+        case (.fullAccess, "it"): return "Per gli adesivi attiva „Consenti accesso completo“"
+        case (.fullAccess, _): return "Stickers need Allow Full Access"
+        case (.failed, "de"): return "Dieser Sticker lässt sich nicht laden"
+        case (.failed, "sq"): return "Kjo ngjitëse nuk u ngarkua"
+        case (.failed, "it"): return "Impossibile caricare l’adesivo"
+        case (.failed, _): return "This sticker could not be loaded"
+        }
+    }
+
     private var searchPlaceholder: String {
         switch controller.language.languageCode {
         case "de": return "Emoji suchen"
@@ -986,8 +1006,9 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func configureEmojiPanel(theme: KeyboardTheme) {
-        emojiPanel.configure(catalog: loadCatalog(), recents: emojiRecents, used: sessionEmoji + userModel.emojiByLastUse,
-                             theme: theme, languageCode: controller.language.languageCode)
+        emojiPanel.configure(catalog: loadCatalog(), recents: emojiRecents, favorites: settings.favoriteEmoji,
+                             stickers: StickerStore.shared.load().stickers.map(\.id),
+                             used: sessionEmoji + userModel.emojiByLastUse, theme: theme, languageCode: controller.language.languageCode)
     }
 
     private func insertEmoji(_ emoji: String) {
@@ -1016,7 +1037,8 @@ final class KeyboardViewController: UIInputViewController {
         let codes = Array(Set((controller.languages + settings.activeLanguages).map { $0.emojiKeywordCode } + ["en"])).sorted()
         let results: [String]
         if query.trimmingCharacters(in: .whitespaces).isEmpty {
-            results = emojiRecents
+            // Like the recents page: the favourites first.
+            results = settings.favoriteEmoji + emojiRecents.filter { !settings.favoriteEmoji.contains($0) }
         } else {
             emojiSearchUsed = true
             results = loadCatalog()?.search(query, languageCodes: codes, limit: 40) ?? []
@@ -1182,6 +1204,7 @@ extension KeyboardViewController: KeyboardViewDelegate {
         case .emoji:
             mode = .emoji
             render()
+            emojiPanel.showRecentsPage()
         case .nextLanguage:
             controller.nextLanguage()
         case .selectLanguage(let language):
@@ -1252,6 +1275,13 @@ extension KeyboardViewController: SuggestionBarDelegate {
 
 extension KeyboardViewController: EmojiPanelDelegate {
     func emojiPanel(_ panel: EmojiPanelView, didSelect emoji: String) { insertEmoji(emoji) }
+
+    /// A keyboard cannot insert images: the sticker goes to the pasteboard, to be pasted into the field.
+    func emojiPanel(_ panel: EmojiPanelView, didSelectSticker id: String) {
+        playFeedback(sound: 1104)
+        guard fullAccess else { panel.showNote(stickerNote(.fullAccess)); return }
+        panel.showNote(stickerNote(StickerStore.shared.copyToPasteboard(id) ? .copied : .failed))
+    }
 
     func emojiPanelDidTapBackspace(_ panel: EmojiPanelView) {
         controller.handle(.backspace)

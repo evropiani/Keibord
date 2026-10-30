@@ -12,7 +12,8 @@ public struct EmojiCategory: Hashable, Sendable {
     /// SF Symbol for the category bar.
     public var symbolName: String {
         switch id {
-        case "recents": return "clock"
+        case "stickers": return "photo.stack" // the user's own stickers (`StickerIndex`)
+        case "recents", "favorites": return "clock" // the favourites open the recents page
         case "smileys_people": return "face.smiling"
         case "animals_nature": return "pawprint"
         case "food_drink": return "fork.knife"

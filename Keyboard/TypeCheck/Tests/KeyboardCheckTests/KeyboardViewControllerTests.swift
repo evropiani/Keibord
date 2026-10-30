@@ -309,6 +309,29 @@ final class KeyboardViewControllerTests: XCTestCase {
         XCTAssertEqual(keyboard.layout?.page, .letters)
     }
 
+    func testHoldingTheNumbersKeyTypesSymbolsAndReleasingItGoesBackToLetters() {
+        start()
+        let metrics = KeyboardMetrics.standard(height: .standard, landscape: false)
+        func centre(_ id: String) -> CGPoint {
+            let f = LayoutGeometry.frames(for: keyboard.layout!, width: keyboard.bounds.width, metrics: metrics).first { $0.key.id == id }!
+            return keyboard.convert(CGPoint(x: f.rect.midX, y: f.rect.midY), to: nil)
+        }
+        let numbers = UITouch()
+        numbers.testLocation = centre("numbers")
+        keyboard.touchesBegan([numbers], with: UIEvent())
+        XCTAssertEqual(keyboard.layout?.page, .numbers)
+        wait(0.35)
+        for id in ["?", "!"] {
+            let t = UITouch()
+            t.testLocation = centre(id)
+            keyboard.touchesBegan([t], with: UIEvent())
+            keyboard.touchesEnded([t], with: UIEvent())
+        }
+        keyboard.touchesEnded([numbers], with: UIEvent())
+        XCTAssertEqual(proxy.text, "?!")
+        XCTAssertEqual(keyboard.layout?.page, .letters)
+    }
+
     func testExternalChangeIsPickedUpAfterOwnEdits() {
         start()
         type("hallo")
@@ -475,6 +498,25 @@ final class KeyboardViewControllerTests: XCTestCase {
         vc.emojiPanelDidTapABC(panel)
         vc.waitForPendingWrites()
         XCTAssertEqual(KeibordStore.shared.loadUserModel().emoji["👍"]?.count, 1, "leaving the emoji panel writes them too")
+        vc.viewWillDisappear(false)
+    }
+
+    func testFavoritesAndStickersInTheEmojiPanel() {
+        var settings = KeibordSettings()
+        settings.favoriteEmoji = ["❤️", "🥳"]
+        KeibordStore.shared.write(StickerIndex(stickers: [StickerEntry(id: "cat", contentKey: "glyph:cat")]), .stickers)
+        defer { KeibordStore.shared.write(StickerIndex(), .stickers) }
+        start(settings: settings)
+        send(.emoji)
+        let panel = subview(EmojiPanelView.self)!
+        let grid = UICollectionView(frame: .zero, collectionViewLayout: UICollectionViewLayout())
+        XCTAssertEqual(panel.collectionView(grid, numberOfItemsInSection: 0), 1, "the stickers, to the left of the recents")
+        XCTAssertEqual(panel.collectionView(grid, numberOfItemsInSection: 1), 2, "then the favourites")
+        panel.collectionView(grid, didSelectItemAt: IndexPath(item: 1, section: 1))
+        XCTAssertEqual(proxy.text, "🥳")
+        panel.collectionView(grid, didSelectItemAt: IndexPath(item: 0, section: 0))
+        XCTAssertEqual(proxy.text, "🥳", "a sticker is never typed")
+        XCTAssertEqual(panel.noteText, "Für Sticker „Vollen Zugriff erlauben“ einschalten", "without Full Access it cannot be copied")
         vc.viewWillDisappear(false)
     }
 

@@ -27,6 +27,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var cards: [StoredCard]
     /// Set when the learned data could not be written; shown by the dictionary.
     @Published var storageError: String? = nil
+    /// The saved stickers, in the order they were added.
+    @Published private(set) var stickers: [StickerEntry] = []
+    /// What the sticker field did last ("Saved", "Already saved" …).
+    @Published var stickerStatus: String? = nil
 
     /// What the files contain (as far as this process knows); `saveNow` writes only what differs.
     private var savedSettings: KeibordSettings
@@ -39,6 +43,7 @@ final class AppModel: ObservableObject {
     /// while newer changes are pending (they would briefly undo what the user just did).
     private var pendingUserModelChanges = 0
     private let userModelQueue = DispatchQueue(label: "com.keibord.app.user-model", qos: .userInitiated)
+    private let stickerQueue = DispatchQueue(label: "com.keibord.app.stickers", qos: .userInitiated)
     static let saveDelay: TimeInterval = 0.4
 
     typealias SortedLists = (learned: [String], blocked: [String])
@@ -188,7 +193,7 @@ final class AppModel: ObservableObject {
     /// Runs `work` on the serial learned-data queue inside a background task: if the user leaves the
     /// app meanwhile, iOS gives the write time to finish instead of suspending the app halfway through
     /// a coordinated write (which would make the keyboard wait for the file).
-    private func performInBackground(_ work: @escaping () -> Void) {
+    private func performInBackground(on queue: DispatchQueue? = nil, _ work: @escaping () -> Void) {
         let application = UIApplication.shared
         var task = UIBackgroundTaskIdentifier.invalid
         let finish: () -> Void = {
@@ -198,7 +203,7 @@ final class AppModel: ObservableObject {
         }
         // The expiration handler runs on the main thread and must end the task before it returns.
         task = application.beginBackgroundTask(withName: "Keibord.saveLearnedData") { finish() }
-        userModelQueue.async {
+        (queue ?? userModelQueue).async {
             work()
             DispatchQueue.main.async { finish() }
         }
@@ -310,6 +315,43 @@ final class AppModel: ObservableObject {
                 if self.pendingUserModelChanges == 0 { self.publish(UserModel(), (learned: [], blocked: []), date: date) }
                 completion?()
             }
+        }
+    }
+}
+
+// MARK: - Stickers
+
+extension AppModel {
+    func reloadStickers() {
+        stickerQueue.async { [weak self] in
+            let list = StickerStore.shared.load().stickers
+            DispatchQueue.main.async { self?.stickers = list }
+        }
+    }
+
+    /// Saves a sticker caught by the sticker field (images are scaled and written in the background).
+    func addSticker(_ capture: StickerCapture) {
+        performInBackground(on: stickerQueue) { [weak self] in
+            let result = StickerStore.shared.add(capture)
+            let list = StickerStore.shared.load().stickers
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.stickers = list
+                switch result {
+                case .added: self.stickerStatus = "Saved – \(list.count) sticker\(list.count == 1 ? "" : "s")"
+                case .duplicate: self.stickerStatus = "Already saved"
+                case .full: self.stickerStatus = "Full: \(StickerIndex.maxCount) stickers. Delete some to add more."
+                case nil: self.stickerStatus = "This sticker could not be saved."
+                }
+            }
+        }
+    }
+
+    func removeStickers(_ ids: Set<String>) {
+        performInBackground(on: stickerQueue) { [weak self] in
+            StickerStore.shared.remove(ids)
+            let list = StickerStore.shared.load().stickers
+            DispatchQueue.main.async { self?.stickers = list }
         }
     }
 }

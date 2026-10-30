@@ -69,6 +69,14 @@ struct SettingsView: View {
                 NavigationLink("Theme & Keys") { AppearanceView() }
                 NavigationLink("Tinted Keys") { TintedKeysView() }
             }
+            Section("Emoji & Stickers") {
+                NavigationLink {
+                    FavoriteEmojiView()
+                } label: {
+                    LabeledContent("Favourite Emoji", value: model.settings.favoriteEmoji.joined())
+                }
+                NavigationLink("Stickers") { StickersView() }
+            }
         }
         .navigationTitle("Settings")
     }

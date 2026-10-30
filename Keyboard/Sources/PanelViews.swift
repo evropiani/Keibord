@@ -152,6 +152,7 @@ final class SuggestionBarView: UIView {
 
 protocol EmojiPanelDelegate: AnyObject {
     func emojiPanel(_ panel: EmojiPanelView, didSelect emoji: String)
+    func emojiPanel(_ panel: EmojiPanelView, didSelectSticker id: String)
     func emojiPanelDidTapBackspace(_ panel: EmojiPanelView)
     func emojiPanelDidTapABC(_ panel: EmojiPanelView)
     func emojiPanelDidRequestSearch(_ panel: EmojiPanelView)
@@ -162,17 +163,42 @@ final class EmojiCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         label.textAlignment = .center
-        label.font = .systemFont(ofSize: 31)
+        label.font = .systemFont(ofSize: 38)
         contentView.addSubview(label)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layoutSubviews() {
         super.layoutSubviews()
         label.frame = contentView.bounds
+        // 38 pt in a 55 pt cell, like Apple's (32 pt wide faces); smaller cells (landscape) scale it.
+        let size = (contentView.bounds.height * EmojiPanelView.fontRatio).rounded()
+        if size > 0, label.font.pointSize != size { label.font = .systemFont(ofSize: size) }
+    }
+}
+
+/// A saved sticker in the emoji panel (its small image, scaled to fit).
+final class StickerCell: UICollectionViewCell {
+    let imageView = UIImageView()
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        imageView.contentMode = .scaleAspectFit
+        contentView.addSubview(imageView)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        imageView.frame = contentView.bounds.insetBy(dx: 4, dy: 4)
     }
 }
 
 final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionViewDelegate {
+    /// The grid of Apple's iOS 26/27 emoji keyboard, measured from screenshots: 55 pt cells (four rows on an
+    /// iPhone), 38 pt emoji, the first column 7 pt from the edge and 22 pt between sections.
+    static let cellSide: CGFloat = 55
+    static let minimumRowHeight: CGFloat = 52
+    static let fontRatio: CGFloat = 38 / 55
+    static let leadingInset: CGFloat = 7
+    static let sectionGap: CGFloat = 22
     weak var delegate: EmojiPanelDelegate?
     private var sections: [EmojiCategory] = []
     private var catalog: EmojiCatalog?
@@ -189,20 +215,29 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private var languageCode = "en"
     /// Backspace held down: deletes again after 0.5 s, then every 0.09 s (like the key area).
     private var backspaceTimer: Timer?
+    /// Small images of the stickers on screen (loaded from the shared folder as the grid shows them).
+    private let stickerImages = NSCache<NSString, UIImage>()
+    /// The recents page is scrolled to once the grid has its size (`showRecentsPage`).
+    private var wantsRecentsPage = false
+    /// A short message over the grid ("Copied …").
+    private let note = UILabel()
+    private var noteToken = 0
 
     override init(frame: CGRect) {
         let flow = UICollectionViewFlowLayout()
         flow.scrollDirection = .horizontal
-        flow.itemSize = CGSize(width: 42, height: 42)
+        flow.itemSize = CGSize(width: Self.cellSide, height: Self.cellSide)
         flow.minimumInteritemSpacing = 0
         flow.minimumLineSpacing = 0
-        flow.sectionInset = UIEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
+        flow.sectionInset = UIEdgeInsets(top: 0, left: Self.leadingInset, bottom: 0, right: Self.sectionGap - Self.leadingInset)
         collection = UICollectionView(frame: .zero, collectionViewLayout: flow)
         super.init(frame: frame)
         backgroundColor = .touchableClear // empty areas must take touches too
         collection.backgroundColor = .touchableClear // scrolling starts between emoji too
         collection.showsHorizontalScrollIndicator = false
         collection.register(EmojiCell.self, forCellWithReuseIdentifier: "e")
+        collection.register(StickerCell.self, forCellWithReuseIdentifier: "s")
+        stickerImages.countLimit = 80
         collection.dataSource = self
         collection.delegate = self
         addSubview(collection)
@@ -226,19 +261,34 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         variantStack.layer.shadowOpacity = 0.3
         variantStack.layer.shadowRadius = 4
         addSubview(variantStack)
+
+        note.textAlignment = .center
+        note.numberOfLines = 2
+        note.font = .systemFont(ofSize: 14, weight: .medium)
+        note.layer.cornerRadius = 10
+        note.layer.masksToBounds = true
+        note.alpha = 0
+        note.isUserInteractionEnabled = false
+        addSubview(note)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// `used`: every emoji used, newest first (for the skin tone last chosen per emoji).
-    func configure(catalog: EmojiCatalog?, recents: [String], used: [String] = [], theme: KeyboardTheme, languageCode: String) {
+    /// `used`: every emoji used, newest first (for the skin tone last chosen per emoji). `favorites` come
+    /// first on the recents page, in their order, the recents after them (without the favourites).
+    /// `stickers` (ids of the saved stickers) are a page to the left of the recents, like Apple's.
+    func configure(catalog: EmojiCatalog?, recents: [String], favorites: [String] = [], stickers: [String] = [], used: [String] = [],
+                   theme: KeyboardTheme, languageCode: String) {
         stopBackspaceRepeat() // the bottom bar (and a held backspace button) is rebuilt below
         self.catalog = catalog
         preferred = catalog?.preferredVariants(used: used) ?? [:]
         self.theme = theme
         self.languageCode = languageCode
         var s: [EmojiCategory] = []
-        if !recents.isEmpty { s.append(EmojiCategory(id: "recents", emojis: recents)) }
+        if !stickers.isEmpty { s.append(EmojiCategory(id: "stickers", emojis: stickers)) }
+        if !favorites.isEmpty { s.append(EmojiCategory(id: "favorites", emojis: favorites)) }
+        let recent = recents.filter { !favorites.contains($0) }
+        if !recent.isEmpty { s.append(EmojiCategory(id: "recents", emojis: recent)) }
         s += catalog?.categories ?? []
         sections = s
         collection.reloadData()
@@ -262,7 +312,8 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         abc.setTitleColor(theme.colors.label.uiColor, for: .normal)
         abc.addTarget(self, action: #selector(abcTapped), for: .touchUpInside)
         bottomBar.addArrangedSubview(abc)
-        for (i, section) in sections.enumerated() {
+        // One button per page; the favourites and the recents after them share the recents page's.
+        for (i, section) in sections.enumerated() where !(section.id == "recents" && i > 0 && sections[i - 1].id == "favorites") {
             let b = UIButton(type: .system)
             b.tag = i
             b.setImage(UIImage(systemName: section.symbolName), for: .normal)
@@ -279,8 +330,46 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         back.addTarget(self, action: #selector(backUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
         bottomBar.addArrangedSubview(back)
         variantStack.backgroundColor = theme.colors.characterKey.uiColor
+        note.backgroundColor = theme.colors.characterKey.uiColor
+        note.textColor = theme.colors.label.uiColor
         updateCategoryHighlight()
     }
+
+    /// Opens on the recents page (the favourites first); the stickers are to its left, like Apple's.
+    func showRecentsPage() {
+        wantsRecentsPage = true
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
+
+    private func scrollToRecentsPage() {
+        guard let index = sections.firstIndex(where: { $0.id != "stickers" }) else { return }
+        var x: CGFloat = 0
+        if index > 0 {
+            collection.layoutIfNeeded()
+            guard let first = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: index)) else { return }
+            x = max(0, first.frame.minX - Self.leadingInset)
+        }
+        collection.contentOffset = CGPoint(x: x, y: 0)
+        updateCategoryHighlight()
+    }
+
+    /// Shows `text` over the grid for a moment.
+    func showNote(_ text: String) {
+        noteToken += 1
+        let token = noteToken
+        note.text = text
+        note.alpha = 1
+        bringSubviewToFront(note)
+        setNeedsLayout()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
+            guard let self = self, self.noteToken == token else { return }
+            UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState], animations: { self.note.alpha = 0 }, completion: nil)
+        }
+    }
+
+    /// The text of the note shown (tests).
+    var noteText: String? { note.alpha > 0 ? note.text : nil }
 
     /// Frees the catalog (and the keyword tables it loaded for searching) while the panel is hidden;
     /// `configure` is called again before it is shown.
@@ -289,6 +378,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         catalog = nil
         sections = []
         preferred = [:]
+        stickerImages.removeAllObjects()
         variantBase = nil
         variantStack.isHidden = true
         collection.reloadData()
@@ -301,10 +391,22 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         bottomBar.frame = CGRect(x: 0, y: bounds.height - barHeight, width: bounds.width, height: barHeight)
         collection.frame = CGRect(x: 0, y: 42, width: bounds.width, height: bounds.height - 42 - barHeight)
         if let flow = collection.collectionViewLayout as? UICollectionViewFlowLayout {
-            let rows = max(1, floor(collection.bounds.height / 42))
-            let side = collection.bounds.height / rows
+            // Apple's 55 pt cells, as many rows as fit (four on an iPhone), the grid centred in its height.
+            let height = collection.bounds.height
+            let rows = max(1, floor(height / Self.minimumRowHeight))
+            let side = min(Self.cellSide, height / rows)
+            let inset = max(0, (height - rows * side) / 2)
             if flow.itemSize.height != side { flow.itemSize = CGSize(width: side, height: side) }
+            if flow.sectionInset.top != inset {
+                flow.sectionInset = UIEdgeInsets(top: inset, left: Self.leadingInset, bottom: inset, right: Self.sectionGap - Self.leadingInset)
+            }
         }
+        if wantsRecentsPage, collection.bounds.width > 0 {
+            wantsRecentsPage = false
+            scrollToRecentsPage()
+        }
+        let noteWidth = min(bounds.width - 32, 340)
+        note.frame = CGRect(x: (bounds.width - noteWidth) / 2, y: collection.frame.maxY - 58, width: noteWidth, height: 50)
     }
 
     func numberOfSections(in collectionView: UICollectionView) -> Int { sections.count }
@@ -314,6 +416,11 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        if sections[indexPath.section].id == "stickers" {
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "s", for: indexPath) as! StickerCell
+            cell.imageView.image = stickerImage(sections[indexPath.section].emojis[indexPath.item])
+            return cell
+        }
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "e", for: indexPath) as! EmojiCell
         cell.label.text = shownEmoji(at: indexPath)
         return cell
@@ -321,14 +428,26 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         variantStack.isHidden = true
-        delegate?.emojiPanel(self, didSelect: shownEmoji(at: indexPath))
+        let section = sections[indexPath.section]
+        if section.id == "stickers" {
+            delegate?.emojiPanel(self, didSelectSticker: section.emojis[indexPath.item])
+        } else {
+            delegate?.emojiPanel(self, didSelect: shownEmoji(at: indexPath))
+        }
     }
 
-    /// The emoji of a cell: recents as used, grid emoji in the skin tone last chosen.
+    private func stickerImage(_ id: String) -> UIImage? {
+        if let cached = stickerImages.object(forKey: id as NSString) { return cached }
+        guard let image = StickerStore.shared.smallImage(id) else { return nil }
+        stickerImages.setObject(image, forKey: id as NSString)
+        return image
+    }
+
+    /// The emoji of a cell: favourites and recents as they are, grid emoji in the skin tone last chosen.
     private func shownEmoji(at indexPath: IndexPath) -> String {
         let section = sections[indexPath.section]
         let emoji = section.emojis[indexPath.item]
-        return section.id == "recents" ? emoji : (preferred[emoji] ?? emoji)
+        return section.id == "recents" || section.id == "favorites" ? emoji : (preferred[emoji] ?? emoji)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -343,8 +462,10 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         for i in 0..<sections.count {
             if let attrs = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: i)), attrs.frame.minX <= x { current = i }
         }
-        for (i, b) in categoryButtons.enumerated() {
-            b.tintColor = i == current ? theme.colors.label.uiColor : theme.secondaryLabel
+        // The button of the page the section belongs to (the recents' is the favourites').
+        let page = categoryButtons.last { $0.tag <= current }
+        for b in categoryButtons {
+            b.tintColor = b === page ? theme.colors.label.uiColor : theme.secondaryLabel
         }
     }
 
@@ -380,7 +501,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
     @objc private func longPressed(_ g: UILongPressGestureRecognizer) {
         guard g.state == .began, let path = collection.indexPathForItem(at: g.location(in: collection)),
-              let cell = collection.cellForItem(at: path) else { return }
+              sections[path.section].id != "stickers", let cell = collection.cellForItem(at: path) else { return }
         let shown = sections[path.section].emojis[path.item]
         let emoji = catalog?.base(of: shown) ?? shown // a toned recent offers its emoji's tones too
         let variants = catalog?.variants(of: emoji) ?? []

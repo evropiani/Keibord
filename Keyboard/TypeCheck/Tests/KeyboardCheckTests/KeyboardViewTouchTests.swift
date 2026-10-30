@@ -132,6 +132,67 @@ final class KeyboardViewTouchTests: XCTestCase {
         XCTAssertEqual(recorder.actions, ["char:5", "space", "char:u"])
     }
 
+    // MARK: Page keys
+
+    /// Switches the page like the controller does when a page key asks for it.
+    private func followPageSwitches() {
+        recorder.onEvent = { [unowned self] event in
+            if case .switchPage(let page) = event { self.configure(self.request(page)) }
+        }
+    }
+
+    func testHoldingTheNumbersKeyTypesSymbolsAndReleasingItGoesBackToLetters() {
+        setUpKeyboard(request())
+        followPageSwitches()
+        let numbers = touch(at: point("numbers"))
+        down(numbers)
+        XCTAssertEqual(keyboard.layout?.page, .numbers, "the page shows as soon as the key is touched")
+        wait(0.35)
+        tap("?")
+        tap("5")
+        XCTAssertEqual(keyboard.layout?.page, .numbers)
+        up(numbers)
+        XCTAssertEqual(recorder.actions, ["page:numbers", "char:?", "char:5", "page:letters"])
+        XCTAssertEqual(keyboard.layout?.page, .letters)
+    }
+
+    func testTappingThePageKeyStaysOnTheNewPage() {
+        setUpKeyboard(request())
+        followPageSwitches()
+        tap("numbers")
+        XCTAssertEqual(keyboard.layout?.page, .numbers)
+        let abc = touch(at: point("letters"))
+        down(abc)
+        wait(0.35)
+        up(abc) // held without typing: stays too
+        XCTAssertEqual(recorder.actions, ["page:numbers", "page:letters"])
+        XCTAssertEqual(keyboard.layout?.page, .letters)
+    }
+
+    func testAPageKeyOverlappingFastTypingIsATap() {
+        setUpKeyboard(request())
+        followPageSwitches()
+        let numbers = touch(at: point("numbers"))
+        down(numbers)
+        tap("5") // the next key before the page key was released
+        up(numbers)
+        XCTAssertEqual(recorder.actions, ["page:numbers", "char:5"])
+        XCTAssertEqual(keyboard.layout?.page, .numbers)
+    }
+
+    func testSlidingFromThePageKeyTypesTheKeyAndGoesBack() {
+        setUpKeyboard(request())
+        followPageSwitches()
+        let numbers = touch(at: point("numbers"))
+        down(numbers)
+        move(numbers, to: point("letters", dx: 5)) // still on the page key ("ABC" now): nothing yet
+        move(numbers, to: point("."))
+        XCTAssertEqual(recorder.actions, ["page:numbers"])
+        up(numbers)
+        XCTAssertEqual(recorder.actions, ["page:numbers", "char:.", "page:letters"])
+        XCTAssertEqual(keyboard.layout?.page, .letters)
+    }
+
     func testSlidingToANeighbourTypesTheKeyUnderTheFinger() {
         setUpKeyboard(request())
         let t = touch(at: point("a"))

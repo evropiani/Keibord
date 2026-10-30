@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(HERE, "Sources", "KeyboardCheck", "Generated")
 SHARED = ["Shared/Support.swift", "Shared/KeibordStore.swift", "Shared/AppGroup.swift", "Shared/KeyboardLog.swift",
-          "Shared/KeyboardIcons.swift"]
+          "Shared/KeyboardIcons.swift", "Shared/StickerStore.swift"]
 
 
 def generate():

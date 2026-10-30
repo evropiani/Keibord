@@ -151,6 +151,9 @@ private enum KeyTiming {
     /// and stayed this close to where it began: a tap, not a swipe.
     static let cancelledTapMaxDuration: TimeInterval = 0.3
     static let cancelledTapMaxTravel: CGFloat = 12
+    /// A page key ("123", "ABC", "#+=") held at least this long while something was typed goes back to
+    /// its page when released; shorter, it was a tap overlapping fast typing ("123", "5") and stays.
+    static let pageHoldMinDuration: TimeInterval = 0.3
 }
 
 /// The key area: draws keys and turns touches into `KeyboardViewEvent`s.
@@ -194,7 +197,8 @@ final class KeyboardView: UIView {
     private var globePressed = false
 
     // Touch tracking
-    private enum Mode { case normal, callout, trackpad, repeating }
+    /// `pageHold`: a page key that switched the page when it was touched and is still held.
+    private enum Mode { case normal, callout, trackpad, repeating, pageHold }
     private final class Tracked {
         var frameIndex: Int
         /// The key this touch is on, captured when it began (or slid onto it), so it commits correctly
@@ -205,6 +209,10 @@ final class KeyboardView: UIView {
         var timer: Timer?
         let order: Int
         var lastX: CGFloat = 0
+        var lastPoint: CGPoint = .zero
+        /// The page a held page key (or a key slid onto from it) goes back to; nil: it stays.
+        var returnPage: LayoutPage?
+        var typedWhileHeld = false
         /// Trackpad: finger x where it started and the cursor steps sent since, so moving back to a
         /// spot always puts the cursor back where it was there.
         var trackpadOriginX: CGFloat = 0
@@ -298,11 +306,22 @@ final class KeyboardView: UIView {
         self.touchOffsets = touchOffsets
         self.touchOffsetsID = touchOffsetsID
         if layoutChanged {
-            cancelAllTouches()
+            cancelAllTouches(keepingPageKeys: true)
             rebuildKeys()
             // Build the new frames now: a touch that begins right after a rollover commit switched the
             // page (e.g. space after a digit) must resolve against the new page, not the old one.
             layoutIfNeeded()
+            // A held page key stays held on the new page, drawn pressed on the page key now under the
+            // finger ("123" becomes "ABC").
+            for t in tracked.values where t.mode == .pageHold {
+                let index = resolver?.resolve(t.lastPoint, letterLog2Prior: [:])?.frameIndex
+                if let index = index, frames.indices.contains(index), case .switchPage = frames[index].key.action {
+                    t.frameIndex = index
+                    t.key = frames[index].key
+                } else {
+                    t.frameIndex = -1
+                }
+            }
         } else if offsetsChanged {
             resolver = TouchResolver(frames: frames, offsets: touchOffsets, touchModelKey: layout.touchModelKey)
         }
@@ -479,11 +498,13 @@ final class KeyboardView: UIView {
 
     // MARK: Touches
 
-    /// Drops every tracked touch without committing it (layout change, keyboard disappearing).
-    func cancelAllTouches() {
+    /// Drops every tracked touch without committing it (layout change, keyboard disappearing); a page
+    /// key that is held stays when `keepingPageKeys` (its own page switch changed the layout).
+    func cancelAllTouches(keepingPageKeys: Bool = false) {
         let shiftWasHeld = tracked.values.contains { $0.key.action == .shift }
-        tracked.values.forEach { $0.timer?.invalidate() }
-        tracked = [:]
+        let dropped = tracked.filter { !keepingPageKeys || $0.value.mode != .pageHold }
+        dropped.values.forEach { $0.timer?.invalidate() }
+        tracked = tracked.filter { dropped[$0.key] == nil }
         globePressed = false
         popup.isHidden = true
         callout.isHidden = true
@@ -497,13 +518,14 @@ final class KeyboardView: UIView {
     /// Keys that commit early when another touch begins (rollover), like the system keyboard.
     private static func commitsOnRollover(_ key: KeySpec) -> Bool {
         switch key.action {
-        case .insert, .space, .returnKey, .switchPage: return true
+        case .insert, .space, .returnKey: return true
         default: return false
         }
     }
 
     /// Rollover: a new touch commits pending taps first, in the order they began, so fast typing never
-    /// loses or reorders characters (also spaces and page keys: "5", space, "U" → "5 U" on letters).
+    /// loses or reorders characters (also spaces: "5", space, "U" → "5 U" on letters). Page keys switch
+    /// when touched (`begin`).
     private func commitPendingTaps() {
         let pending = tracked.filter { $0.value.mode == .normal && Self.commitsOnRollover($0.value.key) }
             .sorted { $0.value.order < $1.value.order }
@@ -525,6 +547,7 @@ final class KeyboardView: UIView {
             touchCounter += 1
             let t = Tracked(frameIndex: hit.frameIndex, key: key, tap: hit.tap, order: touchCounter)
             t.lastX = point.x
+            t.lastPoint = point
             t.startPoint = point
             tracked[ObjectIdentifier(touch)] = t
             delegate?.keyboardView(self, didTrigger: .keyDown(key))
@@ -561,9 +584,30 @@ final class KeyboardView: UIView {
         case .insert:
             showPopup(for: t.frameIndex)
             if !keyAlternates(key).isEmpty { scheduleLongPress(t, delay: 0.42) }
+        case .switchPage(let page):
+            // Like Apple's keyboard the page shows as soon as its key is touched. Held, other fingers
+            // type on it and releasing the key goes back (`releasePageKey`); sliding onto a key types it
+            // and goes back too; a tap stays on the new page.
+            t.mode = .pageHold
+            let holdingAnother = tracked.values.contains { $0 !== t && $0.mode == .pageHold && $0.returnPage != nil }
+            t.returnPage = holdingAnother ? nil : layout?.page
+            delegate?.keyboardView(self, didTrigger: .switchPage(page))
         default:
             break
         }
+    }
+
+    /// The finger left a held page key: back to the page it came from when something was typed while it
+    /// was held (long enough not to be a tap overlapping the next key).
+    private func releasePageKey(_ t: Tracked) {
+        guard let page = t.returnPage, t.typedWhileHeld, layout?.page != page,
+              ProcessInfo.processInfo.systemUptime - t.beganAt >= KeyTiming.pageHoldMinDuration else { return }
+        delegate?.keyboardView(self, didTrigger: .switchPage(page))
+    }
+
+    /// Something was typed: a held page key goes back to its page when released.
+    private func noteTyped() {
+        for t in tracked.values where t.mode == .pageHold { t.typedWhileHeld = true }
     }
 
     private func startBackspaceRepeat(_ t: Tracked, start: Date) {
@@ -637,6 +681,22 @@ final class KeyboardView: UIView {
                 }
             case .callout:
                 callout.select(at: convert(point, to: callout))
+            case .pageHold:
+                t.lastPoint = point
+                t.travel = max(t.travel, hypot(point.x - t.startPoint.x, point.y - t.startPoint.y))
+                // Slid onto a key of the new page (Apple's slide from "123"): it types when released, then
+                // the page goes back.
+                guard let hit = resolver?.resolve(point, letterLog2Prior: [:]), hit.frameIndex != t.frameIndex,
+                      frames.indices.contains(hit.frameIndex), frames[hit.frameIndex].key.style == .character else { continue }
+                let key = frames[hit.frameIndex].key
+                t.mode = .normal
+                t.frameIndex = hit.frameIndex
+                t.key = key
+                t.tap = nil
+                t.lastX = point.x
+                showPopup(for: hit.frameIndex)
+                if !keyAlternates(key).isEmpty { scheduleLongPress(t, delay: 0.42) }
+                refreshAppearance()
             case .normal:
                 t.lastX = point.x
                 t.travel = max(t.travel, hypot(point.x - t.startPoint.x, point.y - t.startPoint.y))
@@ -667,7 +727,9 @@ final class KeyboardView: UIView {
             guard let t = tracked.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
             t.timer?.invalidate()
             t.timer = nil
-            if t.key.action == .globe {
+            if t.mode == .pageHold {
+                releasePageKey(t)
+            } else if t.key.action == .globe {
                 if let event = event { delegate?.keyboardView(self, globeTouchedWith: event, in: self) }
             } else {
                 commit(t)
@@ -701,6 +763,7 @@ final class KeyboardView: UIView {
                 delegate?.keyboardView(self, didTrigger: .trackpad(false))
             }
             if t.mode == .callout { callout.isHidden = true }
+            if t.mode == .pageHold { releasePageKey(t) }
             if t.key.action == .shift { delegate?.keyboardView(self, didTrigger: .shiftReleased) }
         }
         if tracked.isEmpty {
@@ -730,29 +793,44 @@ final class KeyboardView: UIView {
             } else {
                 let options = keyAlternates(key)
                 if options.indices.contains(index) {
+                    noteTyped()
                     delegate?.keyboardView(self, didTrigger: .character(text: options[index], tap: nil, isLetter: key.isLetter))
+                    returnAfterSlide(t)
                 }
             }
             return
-        case .repeating:
+        case .repeating, .pageHold:
             return
         case .normal:
             break
         }
         switch key.action {
         case .insert(let text):
+            noteTyped()
             delegate?.keyboardView(self, didTrigger: .character(text: text, tap: key.isLetter ? t.tap : nil, isLetter: key.isLetter))
-        case .space: delegate?.keyboardView(self, didTrigger: .space)
+            returnAfterSlide(t)
+        case .space:
+            noteTyped()
+            delegate?.keyboardView(self, didTrigger: .space)
         case .returnKey:
             // Dimmed return key (`enablesReturnKeyAutomatically` and an empty field): like the system
             // keyboard it does nothing, so e.g. an empty search or message is not submitted.
-            if returnEnabled { delegate?.keyboardView(self, didTrigger: .returnKey) }
+            if returnEnabled {
+                noteTyped()
+                delegate?.keyboardView(self, didTrigger: .returnKey)
+            }
         case .switchPage(let page): delegate?.keyboardView(self, didTrigger: .switchPage(page))
         case .emoji: delegate?.keyboardView(self, didTrigger: .emoji)
         case .nextLanguage: delegate?.keyboardView(self, didTrigger: .nextLanguage)
         case .shift: delegate?.keyboardView(self, didTrigger: .shiftReleased)
         case .backspace, .globe, .none: break
         }
+    }
+
+    /// A key slid onto from a page key was typed: back to the page the page key came from.
+    private func returnAfterSlide(_ t: Tracked) {
+        guard let page = t.returnPage, layout?.page != page else { return }
+        delegate?.keyboardView(self, didTrigger: .switchPage(page))
     }
 
     // MARK: Popups

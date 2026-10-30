@@ -30,7 +30,46 @@ final class SettingsTests: XCTestCase {
         s.appearance.lightColors = .systemDark
         s.appearance.tintedKeys = [TintedKey(keyID: "return", color: RGBAColor(hex: "#FF0000")!),
                                    TintedKey(keyID: "k", color: RGBAColor(hex: "#00FF00")!, labelColor: .black)]
+        s.favoriteEmoji = ["❤️", "😂", "🇦🇹"]
         return s
+    }
+
+    func testStickerListKeepsEachImageOnceAndSkipsDamagedEntries() throws {
+        var index = StickerIndex()
+        let date = Date(timeIntervalSince1970: 1_800_000_000) // whole seconds, as the JSON keeps them
+        XCTAssertEqual(index.add(StickerEntry(id: "a", contentKey: "glyph:1", label: "cat", hasGlyph: true, added: date)), .added)
+        XCTAssertEqual(index.add(StickerEntry(id: "b", contentKey: "glyph:1", added: date)), .duplicate)
+        XCTAssertEqual(index.add(StickerEntry(id: "c", contentKey: "image:2", added: date)), .added)
+        XCTAssertEqual(index.stickers.map(\.id), ["a", "c"], "in the order they were added")
+        try roundTrip(index)
+        index.remove(ids: ["a"])
+        XCTAssertEqual(index.stickers.map(\.id), ["c"])
+        var full = StickerIndex(stickers: (0..<StickerIndex.maxCount).map { StickerEntry(id: "\($0)", contentKey: "k\($0)") })
+        XCTAssertEqual(full.add(StickerEntry(id: "x", contentKey: "new")), .full)
+
+        let json = """
+        {"stickers": [{"id": "a", "contentKey": "glyph:1", "hasGlyph": "yes"}, {"label": "no id"}, 7,
+                      {"id": "b", "contentKey": "glyph:1"}, {"id": "c"}, {"id": "a", "contentKey": "other"}], "future": 1}
+        """
+        let decoded = try decode(StickerIndex.self, json)
+        XCTAssertEqual(decoded.stickers.map(\.id), ["a", "c"], "damaged entries and repeated images are skipped")
+        XCTAssertFalse(decoded.stickers[0].hasGlyph)
+        XCTAssertEqual(decoded.stickers[1].contentKey, "c")
+        XCTAssertEqual(try decode(StickerIndex.self, "{}"), StickerIndex())
+        XCTAssertEqual(StickerIndex.contentHash(Data([1, 2, 3])), StickerIndex.contentHash(Data([1, 2, 3])))
+        XCTAssertNotEqual(StickerIndex.contentHash(Data([1, 2, 3])), StickerIndex.contentHash(Data([1, 2, 4])))
+    }
+
+    func testFavoriteEmojiAreEmojiOnlyEachOnceAndAtMostEight() throws {
+        var s = KeibordSettings()
+        s.favoriteEmoji = ["😀", "a", "😀", "❤️", "7️⃣", "🇦🇹", "👍🏽", "👨‍👩‍👧", "🙂", "😉", "🥳", "😎"]
+        XCTAssertEqual(s.favoriteEmoji, ["😀", "❤️", "7️⃣", "🇦🇹", "👍🏽", "👨‍👩‍👧", "🙂", "😉"])
+        let decoded = try decode(KeibordSettings.self, #"{"favoriteEmoji": ["🥳", 5, "hi", "🥳", "😎"]}"#)
+        XCTAssertEqual(decoded.favoriteEmoji, ["🥳", "😎"])
+        XCTAssertEqual(try decode(KeibordSettings.self, #"{"favoriteEmoji": "🥳"}"#).favoriteEmoji, [])
+        XCTAssertEqual(EmojiText.emoji(in: "hi 👋🏼 du ❤️!"), ["👋🏼", "❤️"])
+        XCTAssertFalse(EmojiText.isEmoji("1"))
+        XCTAssertFalse(EmojiText.isEmoji("😀😀"))
     }
 
     // MARK: KeibordSettings

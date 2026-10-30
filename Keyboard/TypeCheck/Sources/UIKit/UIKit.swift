@@ -79,10 +79,15 @@ open class UIFont: NSObject {
         public init(rawValue: CGFloat) { self.rawValue = rawValue }
         public static let condensed = Width(rawValue: -0.2), standard = Width(rawValue: 0), expanded = Width(rawValue: 0.2), compressed = Width(rawValue: -0.3)
     }
-    open class func systemFont(ofSize fontSize: CGFloat, weight: UIFont.Weight) -> UIFont { UIFont() }
-    open class func systemFont(ofSize fontSize: CGFloat, weight: UIFont.Weight, width: UIFont.Width) -> UIFont { UIFont() }
-    open class func systemFont(ofSize fontSize: CGFloat) -> UIFont { UIFont() }
-    open class func boldSystemFont(ofSize fontSize: CGFloat) -> UIFont { UIFont() }
+    open private(set) var pointSize: CGFloat = 17
+    convenience init(size: CGFloat) {
+        self.init()
+        pointSize = size
+    }
+    open class func systemFont(ofSize fontSize: CGFloat, weight: UIFont.Weight) -> UIFont { UIFont(size: fontSize) }
+    open class func systemFont(ofSize fontSize: CGFloat, weight: UIFont.Weight, width: UIFont.Width) -> UIFont { UIFont(size: fontSize) }
+    open class func systemFont(ofSize fontSize: CGFloat) -> UIFont { UIFont(size: fontSize) }
+    open class func boldSystemFont(ofSize fontSize: CGFloat) -> UIFont { UIFont(size: fontSize) }
 }
 
 open class UIImage: NSObject {
@@ -443,8 +448,9 @@ open class UIStackView: UIView {
     open var axis: NSLayoutConstraint.Axis = .horizontal
     open var distribution: UIStackView.Distribution = .fill
     open var spacing: CGFloat = 0
-    open var arrangedSubviews: [UIView] { [] }
-    open func addArrangedSubview(_ view: UIView) {}
+    /// Test stand-in: the arranged views are the subviews (removing one from its superview takes it out).
+    open var arrangedSubviews: [UIView] { subviews }
+    open func addArrangedSubview(_ view: UIView) { addSubview(view) }
 }
 
 public protocol UIScrollViewDelegate: AnyObject {
@@ -502,9 +508,13 @@ open class UICollectionView: UIScrollView {
         public static let top = ScrollPosition(rawValue: 1), centeredVertically = ScrollPosition(rawValue: 2), bottom = ScrollPosition(rawValue: 4)
         public static let left = ScrollPosition(rawValue: 8), centeredHorizontally = ScrollPosition(rawValue: 16), right = ScrollPosition(rawValue: 32)
     }
-    public init(frame: CGRect, collectionViewLayout layout: UICollectionViewLayout) { super.init(frame: frame) }
+    private var layoutObject = UICollectionViewLayout()
+    public init(frame: CGRect, collectionViewLayout layout: UICollectionViewLayout) {
+        layoutObject = layout
+        super.init(frame: frame)
+    }
     public required init?(coder: NSCoder) { super.init(coder: coder) }
-    open var collectionViewLayout: UICollectionViewLayout { UICollectionViewLayout() }
+    open var collectionViewLayout: UICollectionViewLayout { layoutObject }
     open weak var dataSource: UICollectionViewDataSource?
     open weak var delegate: UICollectionViewDelegate?
     open func register(_ cellClass: AnyClass?, forCellWithReuseIdentifier identifier: String) {}

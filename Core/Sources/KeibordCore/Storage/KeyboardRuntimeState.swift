@@ -37,6 +37,8 @@ public enum KeibordFile: String, CaseIterable, Sendable {
     case userModel = "user-model.json"
     case state = "state.json"
     case cards = "cards.json"
+    /// The saved stickers (`StickerIndex`); their images are in the `Stickers` folder next to it.
+    case stickers = "stickers.json"
     case deviceKey = "device.key"
     /// What the keyboard did (opening, sizes, stalls): `KeyboardLog`, shown in the app.
     case keyboardLog = "keyboard-log.txt"
