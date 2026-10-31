@@ -107,16 +107,16 @@ final class StickerStore {
                 provider.suggestedName = "Sticker"
                 return provider
             }
-            // Dropped into Messages, all of the string's types made a folder (1.0.30): Messages attaches the
-            // RTFD package (a folder) as a file. Pasting reads the string itself, so a drag offers only
-            // UIKit's own archive of it, which text views insert as the sticker.
+            // A drop into Messages takes an item as an attachment or as text. With all of the string's types
+            // it attached the RTFD package as a folder (1.0.30); with only UIKit's archive of the string it
+            // took nothing (1.0.31). So a drag offers the archive (the sticker itself, which pasting reads)
+            // and the rich text types, so the item counts as text, but no folder (RTFD package), no flat
+            // RTFD file and no plain text (an empty box). The log says which type the receiver loads.
             let all = NSAttributedString.writableTypeIdentifiersForItemProvider
-            var types = all.filter { $0.lowercased().contains("attributedstring") }
-            if types.isEmpty {
-                types = all.filter { identifier in
-                    guard let type = UTType(identifier) else { return false }
-                    return !type.conforms(to: .compositeContent) && !type.conforms(to: .directory) && !type.conforms(to: .text)
-                }
+            let types = all.filter { identifier in
+                if identifier.lowercased().contains("attributedstring") { return true }
+                guard let type = UTType(identifier) else { return false }
+                return type.conforms(to: .text) && !type.conforms(to: .plainText) && !type.conforms(to: .compositeContent)
             }
             KeyboardLog.shared.add("sticker drag: offers \(types.joined(separator: ", ")) of \(all.joined(separator: ", "))")
             guard !types.isEmpty else { return NSItemProvider(object: sticker) }
@@ -124,7 +124,8 @@ final class StickerStore {
             provider.suggestedName = "Sticker"
             for type in types {
                 provider.registerDataRepresentation(forTypeIdentifier: type, visibility: .all) { completion in
-                    sticker.loadData(withTypeIdentifier: type, forItemProviderCompletionHandler: completion)
+                    KeyboardLog.shared.add("sticker drag: the app loads \(type)")
+                    return sticker.loadData(withTypeIdentifier: type, forItemProviderCompletionHandler: completion)
                 }
             }
             return provider

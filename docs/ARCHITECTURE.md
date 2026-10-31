@@ -474,9 +474,10 @@ Compiled into both targets (no framework). UIKit/CryptoKit/Security/CommonCrypto
    coordinated append) and deletes; the keyboard reads, copies and drags (`itemProvider`): a sticker
    from Apple's keyboard only as `NSItemProvider(object:)` of the attributed string with its adaptive
    image glyph (UIKit writes the types text views read), so Messages takes it as a sticker; an image
-   next to it made Messages send a photo (1.0.29). A drag offers only UIKit's own archive of that string
-   (`com.apple.uikit.attributedstring`): with all its types Messages attached the RTFD package as a
-   folder (1.0.30); the keyboard log lists the types offered. Stickers saved as plain images go out as a PNG.
+   next to it made Messages send a photo (1.0.29). A drag offers UIKit's own archive of that string
+   (`com.apple.uikit.attributedstring`) plus its rich text types (RTF, HTML), so a drop counts as text:
+   with all types Messages attached the RTFD package as a folder (1.0.30), with only the archive it
+   took nothing (1.0.31). The keyboard log lists the types offered and the one the receiver loads. Stickers saved as plain images go out as a PNG.
 
 ## 10. Keyboard extension (Keyboard/) — work package G
 
