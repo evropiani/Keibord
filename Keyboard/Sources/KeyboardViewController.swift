@@ -955,10 +955,10 @@ final class KeyboardViewController: UIInputViewController {
 
     private func stickerNote(_ note: StickerNote) -> String {
         switch (note, controller.language.languageCode) {
-        case (.copied, "de"): return "Kopiert – im Textfeld „Einsetzen“ wählen"
-        case (.copied, "sq"): return "U kopjua – prek fushën e tekstit dhe ngjite"
-        case (.copied, "it"): return "Copiato – tocca il campo di testo e scegli Incolla"
-        case (.copied, _): return "Copied – tap the text field and choose Paste"
+        case (.copied, "de"): return "Kopiert – einsetzen, oder Sticker halten und ins Textfeld ziehen"
+        case (.copied, "sq"): return "U kopjua – ngjite, ose mbaje ngjitësen dhe tërhiqe te teksti"
+        case (.copied, "it"): return "Copiato – incollalo, o tieni premuto l’adesivo e trascinalo nel testo"
+        case (.copied, _): return "Copied – paste it, or hold a sticker and drag it into the field"
         case (.fullAccess, "de"): return "Für Sticker „Vollen Zugriff erlauben“ einschalten"
         case (.fullAccess, "sq"): return "Për ngjitëset aktivizo „Allow Full Access“"
         case (.fullAccess, "it"): return "Per gli adesivi attiva „Consenti accesso completo“"
@@ -1276,7 +1276,8 @@ extension KeyboardViewController: SuggestionBarDelegate {
 extension KeyboardViewController: EmojiPanelDelegate {
     func emojiPanel(_ panel: EmojiPanelView, didSelect emoji: String) { insertEmoji(emoji) }
 
-    /// A keyboard cannot insert images: the sticker goes to the pasteboard, to be pasted into the field.
+    /// A keyboard cannot insert images: a tapped sticker goes to the pasteboard, to be pasted into the
+    /// field; a held one can be dragged there (`EmojiPanelView.addStickerDrag`).
     func emojiPanel(_ panel: EmojiPanelView, didSelectSticker id: String) {
         playFeedback(sound: 1104)
         guard fullAccess else { panel.showNote(stickerNote(.fullAccess)); return }

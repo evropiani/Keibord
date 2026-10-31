@@ -1,6 +1,6 @@
-Keibord 1.0.26: try dragging stickers into the text field.
+Keibord 1.0.27: automatic backups, and dragging stickers is here to stay.
 
-- Experiment: hold a sticker in Keibord's emoji panel until it lifts, then drag it up into the text field and let go. If iOS allows it, the sticker is inserted without pasting. Apple doesn't say whether a keyboard may start a drag, so this is a test: if holding a sticker does nothing, iOS doesn't allow it. Tapping a sticker still copies it as before.
-- The keyboard log (Data › Keyboard Log in the app) notes each try ("sticker drag: lifted", "dropped" or "cancelled"), so we can see what iOS did.
+- Automatic backup: under Data › Automatic Backup, set a password and choose a folder (for example iCloud Drive › Keibord) once. The new Shortcuts action "Back Up Keibord" then saves an encrypted backup of your typing data, settings and details as Keibord-Backup.json in that folder, always replacing the last one. Add it to a daily automation in Shortcuts (Automation › + › Time of Day, Run Immediately › Back Up Keibord); the screen in the app shows the steps and opens Shortcuts. iOS doesn't let apps create automations themselves. Back Up Now makes one straight away. Restore it under Data › Import with the password. Cards are never backed up.
+- Stickers: holding a sticker and dragging it into the text field is now a regular feature (thanks for testing it). Tapping one still copies it.
 
 Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboards), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.

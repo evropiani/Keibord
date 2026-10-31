@@ -518,6 +518,15 @@ struct DataView: View {
                 Text("Typing data: learned words, word pairs, your touch model and emoji history. All settings: languages, layouts, appearance, colours, tinted keys and every option.")
             }
             Section {
+                NavigationLink {
+                    AutoBackupView()
+                } label: {
+                    LabeledContent("Automatic Backup", value: AutoBackup.shared.isSetUp ? "Set Up" : "Off")
+                }
+            } footer: {
+                Text("Every day by itself, with a password, into a folder such as iCloud Drive (with Shortcuts).")
+            }
+            Section {
                 Button("Import…") { pickImportFile() }
                     .disabled(busy)
             } header: {

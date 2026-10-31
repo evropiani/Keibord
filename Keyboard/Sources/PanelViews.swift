@@ -573,9 +573,9 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 // MARK: - Dragging stickers
 
 extension EmojiPanelView {
-    /// Experiment (1.0.26): a held sticker can be dragged out of the keyboard into the text field, so it
-    /// need not be pasted. Apple documents no drag out of a keyboard; if iOS does not start one, holding a
-    /// sticker does nothing and tapping still copies it. The keyboard log says what happened.
+    /// A held sticker can be dragged out of the keyboard into the text field, so it need not be pasted.
+    /// Apple documents no drag out of a keyboard, but iOS 26/27 starts it (tried in 1.0.26 on the user's
+    /// iPhone: it works). The keyboard log records lifts and how each drag ended.
     func addStickerDrag(to cell: StickerCell) {
         #if os(iOS)
         guard !cell.interactions.contains(where: { $0 is UIDragInteraction }) else { return }

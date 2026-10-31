@@ -70,7 +70,7 @@ struct StickersView: View {
                 Text(model.stickerStatus ?? " ")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Text("In Keibord, the stickers are to the left of the recent emoji. Tapping one copies it; then tap the text field and choose Paste. Apps that take Apple's stickers show it like one, other apps as an image. Stickers with effects or animation are saved as still images. Needs Allow Full Access.")
+                Text("In Keibord, the stickers are to the left of the recent emoji. Hold one until it lifts and drag it into the text field, or tap it to copy it and paste it. Apps that take Apple's stickers show it like one, other apps as an image. Stickers with effects or animation are saved as still images. Needs Allow Full Access.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 if !model.stickers.isEmpty {

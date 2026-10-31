@@ -583,10 +583,11 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   `KeyboardIcons.sticker`, fitted to a screenshot), `clock` for favourites + recents, `face.smiling`, `pawprint`,
   `fork.knife`, `soccerball`, `car`, `lightbulb`, `heart`, `flag`), backspace on the right. Long-press
   an emoji with variants → skin-tone picker. Tapping a sticker copies it (`StickerStore.copyToPasteboard`,
-  needs Full Access; a keyboard cannot insert images) and a note says to paste it. Experiment (1.0.26):
-  a held sticker can be dragged into the text field (`UIDragInteraction` on the sticker cells, the same
-  data as the copy; the skin-tone long press skips stickers so it cannot beat the lift). Apple documents
-  no drag out of a keyboard; the keyboard log records lifts and how drags ended. Search field at the
+  needs Full Access; a keyboard cannot insert images) and a note says to paste it. A held sticker
+  is dragged into the text field instead (`UIDragInteraction` on the sticker cells, the same data as the
+  copy; the skin-tone long press skips stickers so it cannot beat the lift). Apple documents no drag out
+  of a keyboard, but iOS 26/27 allows it (tried in 1.0.26: it works); the keyboard log records lifts and
+  how drags ended. Search field at the
   top: tapping it shows the letters layout with the search query above it (keys go to the query, not
   the document), results row of matching emojis (favourites and recents while the query is empty).
 * **CardUnlockView**: appears when a card chip is tapped for a card with `requiresCVV`: title
@@ -623,6 +624,13 @@ SwiftUI, `NavigationStack` + `List`. Tabs: **Keyboard** (home), **Settings**, **
   image attachment) at once (`AppModel.addSticker` → `StickerStore`, in the background) and empties
   the field for the next one; other text is dropped with a hint. Grid of the saved stickers (hold →
   Delete), Delete All.
+* **Automatic Backup** (Data): the Shortcuts action "Back Up Keibord" (`BackUpKeibordIntent`, App
+  Intents, also an App Shortcut) writes an encrypted backup of typing data, settings and details as
+  `Keibord-Backup.json` into a folder picked in the app (security-scoped bookmark), replacing the last
+  one (`AutoBackup`, coordinated atomic write). The password is in the keychain
+  (`AfterFirstUnlockThisDeviceOnly`, so a night-time automation runs while the iPhone is locked); the
+  action has no parameters. Apps cannot create Shortcuts automations, so the screen lists the steps
+  (Automation › + › Time of Day › Run Immediately › Back Up Keibord) and opens Shortcuts.
 * **Dictionary**: learned words (search, sort by count/recent, swipe to delete, add word), blocked
   words (add/remove), statistics (word count, bigram count, touch samples). Edits go through
   `KeibordStore.updateUserModel`.
