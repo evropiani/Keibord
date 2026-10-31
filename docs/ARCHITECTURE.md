@@ -471,9 +471,10 @@ Compiled into both targets (no framework). UIKit/CryptoKit/Security/CommonCrypto
    and the `Stickers/` folder next to it: `<id>.png` (≤ 320 px, pasted), `<id>-small.png` (≤ 150 px,
    the keyboard's grid) and `<id>.glyph` (Apple's adaptive image glyph data). The app adds
    (`add(_ capture:)`: the largest image of the glyph's data via ImageIO, scaled PNGs, then a
-   coordinated append) and deletes; the keyboard reads and copies: the pasteboard item holds a PNG
-   and, on iOS 18+, flat RTFD with the adaptive image glyph, so apps that take Apple's stickers
-   (Messages, Notes) paste it like one.
+   coordinated append) and deletes; the keyboard reads, copies and drags (`itemProvider`): a sticker
+   from Apple's keyboard only as `NSItemProvider(object:)` of the attributed string with its adaptive
+   image glyph (UIKit writes the types text views read), so Messages takes it as a sticker; an image
+   next to it made Messages send a photo (1.0.29). Stickers saved as plain images go out as a PNG.
 
 ## 10. Keyboard extension (Keyboard/) — work package G
 

@@ -88,42 +88,32 @@ final class StickerStore {
         UIImage(contentsOfFile: smallImageURL(id).path)
     }
 
-    /// Puts a sticker on the pasteboard (the keyboard needs Full Access): as Apple's sticker (an adaptive
-    /// image glyph in rich text) for apps that take one, and as a PNG for all others.
+    /// Puts a sticker on the pasteboard (the keyboard needs Full Access), the same data as dragging it.
     func copyToPasteboard(_ id: String) -> Bool {
-        guard let representations = representations(id) else { return false }
-        let item: [String: Any] = Dictionary(representations, uniquingKeysWith: { first, _ in first })
-        UIPasteboard.general.setItems([item])
+        guard let provider = itemProvider(id) else { return false }
+        UIPasteboard.general.setItemProviders([provider], localOnly: false, expirationDate: nil)
         return true
     }
 
-    /// A sticker to drag out of the keyboard: the same data as `copyToPasteboard`.
+    /// A sticker for the pasteboard or a drag. One taken from Apple's keyboard is offered only as Apple's
+    /// sticker: the attributed string with its adaptive image glyph, written by UIKit in the types text
+    /// views read (iOS 18+). An image next to it made Messages send a photo instead of a sticker (1.0.29),
+    /// so there is none. Stickers saved as plain images are offered as a PNG.
     func itemProvider(_ id: String) -> NSItemProvider? {
-        guard let representations = representations(id) else { return nil }
+        if #available(iOS 18.0, *), let content = try? Data(contentsOf: glyphURL(id)) {
+            let sticker = NSAttributedString(adaptiveImageGlyph: NSAdaptiveImageGlyph(imageContent: content), attributes: [:])
+            let provider = NSItemProvider(object: sticker)
+            provider.suggestedName = "Sticker"
+            return provider
+        }
+        guard let png = try? Data(contentsOf: imageURL(id)) else { return nil }
         let provider = NSItemProvider()
         provider.suggestedName = "Sticker"
-        for (type, data) in representations {
-            provider.registerDataRepresentation(forTypeIdentifier: type, visibility: .all) { completion in
-                completion(data, nil)
-                return nil
-            }
+        provider.registerDataRepresentation(forTypeIdentifier: UTType.png.identifier, visibility: .all) { completion in
+            completion(png, nil)
+            return nil
         }
         return provider
-    }
-
-    /// A sticker's data by type: Apple's sticker (an adaptive image glyph in flat RTFD, iOS 18+) for
-    /// apps that take one, and a PNG for all others.
-    private func representations(_ id: String) -> [(String, Data)]? {
-        guard let png = try? Data(contentsOf: imageURL(id)) else { return nil }
-        var result = [(UTType.png.identifier, png)]
-        if #available(iOS 18.0, *), let content = try? Data(contentsOf: glyphURL(id)) {
-            let text = NSAttributedString(adaptiveImageGlyph: NSAdaptiveImageGlyph(imageContent: content), attributes: [:])
-            if let rtfd = try? text.data(from: NSRange(location: 0, length: text.length),
-                                         documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd]) {
-                result.insert((UTType.flatRTFD.identifier, rtfd), at: 0)
-            }
-        }
-        return result
     }
 
     /// The largest image in `data` (Apple's stickers hold one image per size).
