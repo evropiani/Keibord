@@ -179,6 +179,7 @@ final class EmojiCell: UICollectionViewCell {
 /// A saved sticker in the emoji panel (its small image, scaled to fit).
 final class StickerCell: UICollectionViewCell {
     let imageView = UIImageView()
+    var stickerID: String?
     override init(frame: CGRect) {
         super.init(frame: frame)
         imageView.contentMode = .scaleAspectFit
@@ -221,6 +222,9 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private var wantsRecentsPage = false
     /// A short message over the grid ("Copied …").
     private let note = UILabel()
+    #if os(iOS)
+    private let pressFilter = StickerPressFilter()
+    #endif
     private var noteToken = 0
 
     override init(frame: CGRect) {
@@ -243,6 +247,10 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         addSubview(collection)
         let press = UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:)))
         press.minimumPressDuration = 0.35
+        #if os(iOS)
+        pressFilter.panel = self
+        press.delegate = pressFilter // not on stickers: a held sticker is dragged
+        #endif
         collection.addGestureRecognizer(press)
 
         searchButton.contentHorizontalAlignment = .left
@@ -423,7 +431,10 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         if sections[indexPath.section].id == "stickers" {
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "s", for: indexPath) as! StickerCell
-            cell.imageView.image = stickerImage(sections[indexPath.section].emojis[indexPath.item])
+            let id = sections[indexPath.section].emojis[indexPath.item]
+            cell.stickerID = id
+            cell.imageView.image = stickerImage(id)
+            addStickerDrag(to: cell)
             return cell
         }
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "e", for: indexPath) as! EmojiCell
@@ -439,6 +450,12 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         } else {
             delegate?.emojiPanel(self, didSelect: shownEmoji(at: indexPath))
         }
+    }
+
+    /// The skin-tone long press starts anywhere but on a sticker (`point` in the grid's coordinates).
+    func allowsLongPress(at point: CGPoint) -> Bool {
+        guard let path = collection.indexPathForItem(at: point), sections.indices.contains(path.section) else { return true }
+        return sections[path.section].id != "stickers"
     }
 
     private func stickerImage(_ id: String) -> UIImage? {
@@ -552,6 +569,65 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         delegate?.emojiPanel(self, didSelect: e)
     }
 }
+
+// MARK: - Dragging stickers
+
+extension EmojiPanelView {
+    /// Experiment (1.0.26): a held sticker can be dragged out of the keyboard into the text field, so it
+    /// need not be pasted. Apple documents no drag out of a keyboard; if iOS does not start one, holding a
+    /// sticker does nothing and tapping still copies it. The keyboard log says what happened.
+    func addStickerDrag(to cell: StickerCell) {
+        #if os(iOS)
+        guard !cell.interactions.contains(where: { $0 is UIDragInteraction }) else { return }
+        let drag = UIDragInteraction(delegate: self)
+        drag.isEnabled = true // off by default on the iPhone
+        cell.addInteraction(drag)
+        #endif
+    }
+}
+
+#if os(iOS)
+extension EmojiPanelView: UIDragInteractionDelegate {
+    func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
+        guard let cell = interaction.view as? StickerCell, let id = cell.stickerID,
+              let provider = StickerStore.shared.itemProvider(id) else { return [] }
+        KeyboardLog.shared.add("sticker drag: lifted")
+        let item = UIDragItem(itemProvider: provider)
+        item.localObject = id
+        return [item]
+    }
+
+    /// Only the sticker lifts, not its cell.
+    func dragInteraction(_ interaction: UIDragInteraction, previewForLifting item: UIDragItem, session: UIDragSession) -> UITargetedDragPreview? {
+        guard let cell = interaction.view as? StickerCell, cell.imageView.window != nil else { return nil }
+        let parameters = UIDragPreviewParameters()
+        parameters.backgroundColor = .clear
+        return UITargetedDragPreview(view: cell.imageView, parameters: parameters)
+    }
+
+    func dragInteraction(_ interaction: UIDragInteraction, session: UIDragSession, didEndWith operation: UIDropOperation) {
+        let result: String
+        switch operation {
+        case .copy: result = "dropped (copy)"
+        case .move: result = "dropped (move)"
+        case .cancel: result = "cancelled"
+        case .forbidden: result = "forbidden"
+        @unknown default: result = "ended (\(operation.rawValue))"
+        }
+        KeyboardLog.shared.add("sticker drag: \(result)")
+    }
+}
+
+/// Keeps the skin-tone long press (0.35 s) off stickers: it would beat the drag's lift.
+final class StickerPressFilter: NSObject, UIGestureRecognizerDelegate {
+    weak var panel: EmojiPanelView?
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let panel = panel, let view = gestureRecognizer.view else { return true }
+        return panel.allowsLongPress(at: gestureRecognizer.location(in: view))
+    }
+}
+#endif
 
 // MARK: - Emoji search bar (shown above the letter keys while searching)
 

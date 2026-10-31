@@ -91,17 +91,39 @@ final class StickerStore {
     /// Puts a sticker on the pasteboard (the keyboard needs Full Access): as Apple's sticker (an adaptive
     /// image glyph in rich text) for apps that take one, and as a PNG for all others.
     func copyToPasteboard(_ id: String) -> Bool {
-        guard let png = try? Data(contentsOf: imageURL(id)) else { return false }
-        var item: [String: Any] = [UTType.png.identifier: png]
+        guard let representations = representations(id) else { return false }
+        let item: [String: Any] = Dictionary(representations, uniquingKeysWith: { first, _ in first })
+        UIPasteboard.general.setItems([item])
+        return true
+    }
+
+    /// A sticker to drag out of the keyboard: the same data as `copyToPasteboard`.
+    func itemProvider(_ id: String) -> NSItemProvider? {
+        guard let representations = representations(id) else { return nil }
+        let provider = NSItemProvider()
+        provider.suggestedName = "Sticker"
+        for (type, data) in representations {
+            provider.registerDataRepresentation(forTypeIdentifier: type, visibility: .all) { completion in
+                completion(data, nil)
+                return nil
+            }
+        }
+        return provider
+    }
+
+    /// A sticker's data by type: Apple's sticker (an adaptive image glyph in flat RTFD, iOS 18+) for
+    /// apps that take one, and a PNG for all others.
+    private func representations(_ id: String) -> [(String, Data)]? {
+        guard let png = try? Data(contentsOf: imageURL(id)) else { return nil }
+        var result = [(UTType.png.identifier, png)]
         if #available(iOS 18.0, *), let content = try? Data(contentsOf: glyphURL(id)) {
             let text = NSAttributedString(adaptiveImageGlyph: NSAdaptiveImageGlyph(imageContent: content), attributes: [:])
             if let rtfd = try? text.data(from: NSRange(location: 0, length: text.length),
                                          documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd]) {
-                item[UTType.flatRTFD.identifier] = rtfd
+                result.insert((UTType.flatRTFD.identifier, rtfd), at: 0)
             }
         }
-        UIPasteboard.general.setItems([item])
-        return true
+        return result
     }
 
     /// The largest image in `data` (Apple's stickers hold one image per size).

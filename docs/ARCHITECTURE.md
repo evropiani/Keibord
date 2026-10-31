@@ -583,7 +583,10 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   `KeyboardIcons.sticker`, fitted to a screenshot), `clock` for favourites + recents, `face.smiling`, `pawprint`,
   `fork.knife`, `soccerball`, `car`, `lightbulb`, `heart`, `flag`), backspace on the right. Long-press
   an emoji with variants → skin-tone picker. Tapping a sticker copies it (`StickerStore.copyToPasteboard`,
-  needs Full Access; a keyboard cannot insert images) and a note says to paste it. Search field at the
+  needs Full Access; a keyboard cannot insert images) and a note says to paste it. Experiment (1.0.26):
+  a held sticker can be dragged into the text field (`UIDragInteraction` on the sticker cells, the same
+  data as the copy; the skin-tone long press skips stickers so it cannot beat the lift). Apple documents
+  no drag out of a keyboard; the keyboard log records lifts and how drags ended. Search field at the
   top: tapping it shows the letters layout with the search query above it (keys go to the query, not
   the document), results row of matching emojis (favourites and recents while the query is empty).
 * **CardUnlockView**: appears when a card chip is tapped for a card with `requiresCVV`: title
