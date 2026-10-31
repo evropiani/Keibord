@@ -524,7 +524,7 @@ struct DataView: View {
                     LabeledContent("Automatic Backup", value: AutoBackup.shared.isSetUp ? "Set Up" : "Off")
                 }
             } footer: {
-                Text("Every day by itself, with a password, into a folder such as iCloud Drive (with Shortcuts).")
+                Text("Every day by itself with Shortcuts, with a password, into Files › On My iPhone › Keibord.")
             }
             Section {
                 Button("Import…") { pickImportFile() }
