@@ -625,9 +625,11 @@ SwiftUI, `NavigationStack` + `List`. Tabs: **Keyboard** (home), **Settings**, **
   the field for the next one; other text is dropped with a hint. Grid of the saved stickers (hold →
   Delete), Delete All.
 * **Automatic Backup** (Data): the Shortcuts action "Back Up Keibord" (`BackUpKeibordIntent`, App
-  Intents, also an App Shortcut) writes an encrypted backup of typing data, settings and details as
-  `Keibord-Backup.json` into a folder picked in the app (security-scoped bookmark), replacing the last
-  one (`AutoBackup`, coordinated atomic write). The password is in the keychain
+  Intents, also an App Shortcut) writes an encrypted backup of typing data, settings and details into
+  `Keibord-Backup.json`, the file the user saved once from the app with the Save dialog
+  (`UIDocumentPickerViewController(forExporting:asCopy: false)`, security-scoped bookmark of the file),
+  replacing its contents (`AutoBackup`, coordinated write in place: only the file is accessible, not its
+  folder). A folder picker (`forOpeningContentTypes: [.folder]`) did nothing when Open was tapped (1.0.27). The password is in the keychain
   (`AfterFirstUnlockThisDeviceOnly`, so a night-time automation runs while the iPhone is locked); the
   action has no parameters. Apps cannot create Shortcuts automations, so the screen lists the steps
   (Automation › + › Time of Day › Run Immediately › Back Up Keibord) and opens Shortcuts.

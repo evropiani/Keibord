@@ -1,6 +1,5 @@
-Keibord 1.0.27: automatic backups, and dragging stickers is here to stay.
+Keibord 1.0.28: choosing where the automatic backup goes works now.
 
-- Automatic backup: under Data › Automatic Backup, set a password and choose a folder (for example iCloud Drive › Keibord) once. The new Shortcuts action "Back Up Keibord" then saves an encrypted backup of your typing data, settings and details as Keibord-Backup.json in that folder, always replacing the last one. Add it to a daily automation in Shortcuts (Automation › + › Time of Day, Run Immediately › Back Up Keibord); the screen in the app shows the steps and opens Shortcuts. iOS doesn't let apps create automations themselves. Back Up Now makes one straight away. Restore it under Data › Import with the password. Cards are never backed up.
-- Stickers: holding a sticker and dragging it into the text field is now a regular feature (thanks for testing it). Tapping one still copies it.
+- Automatic backup: in 1.0.27 the folder could not be chosen (tapping Open did nothing). Step 2 is now "Choose Where to Save…": it makes the first backup and opens the Save dialog; pick a folder such as iCloud Drive › Keibord and tap Move. Every later backup (Back Up Now or the Shortcuts action "Back Up Keibord") replaces that file, Keibord-Backup.json. If you move or delete the file, choose where to save it again.
 
 Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboards), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.

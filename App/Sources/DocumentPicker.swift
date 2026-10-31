@@ -19,12 +19,12 @@ final class DocumentPicker: NSObject, UIDocumentPickerDelegate {
         presenter.present(picker, animated: true)
     }
 
-    /// Lets the user pick a folder (for automatic backups). The URL is security-scoped: keep a bookmark
-    /// of it to write there later.
-    func pickFolder(completion: @escaping (URL?) -> Void) {
+    /// The Save dialog for `url` (the first automatic backup): the file is moved where the user saves it,
+    /// and the completion gets its new, security-scoped place (keep a bookmark of it to write there later).
+    /// A folder picker (`forOpeningContentTypes: [.folder]`) did nothing when Open was tapped (1.0.27).
+    func export(_ url: URL, completion: @escaping (URL?) -> Void) {
         guard let presenter = Self.topViewController() else { completion(nil); return }
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
-        picker.allowsMultipleSelection = false
+        let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: false)
         picker.delegate = self
         self.completion = completion
         presenter.present(picker, animated: true)
