@@ -99,11 +99,34 @@ final class StickerStore {
     /// sticker: the attributed string with its adaptive image glyph, written by UIKit in the types text
     /// views read (iOS 18+). An image next to it made Messages send a photo instead of a sticker (1.0.29),
     /// so there is none. Stickers saved as plain images are offered as a PNG.
-    func itemProvider(_ id: String) -> NSItemProvider? {
+    func itemProvider(_ id: String, forDrag: Bool = false) -> NSItemProvider? {
         if #available(iOS 18.0, *), let content = try? Data(contentsOf: glyphURL(id)) {
             let sticker = NSAttributedString(adaptiveImageGlyph: NSAdaptiveImageGlyph(imageContent: content), attributes: [:])
-            let provider = NSItemProvider(object: sticker)
+            guard forDrag else {
+                let provider = NSItemProvider(object: sticker)
+                provider.suggestedName = "Sticker"
+                return provider
+            }
+            // Dropped into Messages, all of the string's types made a folder (1.0.30): Messages attaches the
+            // RTFD package (a folder) as a file. Pasting reads the string itself, so a drag offers only
+            // UIKit's own archive of it, which text views insert as the sticker.
+            let all = NSAttributedString.writableTypeIdentifiersForItemProvider
+            var types = all.filter { $0.lowercased().contains("attributedstring") }
+            if types.isEmpty {
+                types = all.filter { identifier in
+                    guard let type = UTType(identifier) else { return false }
+                    return !type.conforms(to: .compositeContent) && !type.conforms(to: .directory) && !type.conforms(to: .text)
+                }
+            }
+            KeyboardLog.shared.add("sticker drag: offers \(types.joined(separator: ", ")) of \(all.joined(separator: ", "))")
+            guard !types.isEmpty else { return NSItemProvider(object: sticker) }
+            let provider = NSItemProvider()
             provider.suggestedName = "Sticker"
+            for type in types {
+                provider.registerDataRepresentation(forTypeIdentifier: type, visibility: .all) { completion in
+                    sticker.loadData(withTypeIdentifier: type, forItemProviderCompletionHandler: completion)
+                }
+            }
             return provider
         }
         guard let png = try? Data(contentsOf: imageURL(id)) else { return nil }

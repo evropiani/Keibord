@@ -1,5 +1,6 @@
-Keibord 1.0.30: stickers arrive as stickers, not photos.
+Keibord 1.0.31: dragged stickers arrive as stickers, not folders.
 
-- Stickers from Keibord went out as photos in Messages: besides Apple's sticker, Keibord also handed over a plain picture of it, and Messages took the picture. A sticker taken from Apple's keyboard is now handed over only as Apple's sticker, the way Apple's emoji keyboard does it, whether you drag it or copy and paste it. Apps that take no stickers may not accept it; tell me which ones if you miss it there.
+- Dragging a sticker into Messages sent a folder in 1.0.30: Keibord offered the sticker in several formats, and one of them is stored as a folder, which Messages attached as it was. A dragged sticker is now offered only in the format Messages reads when you paste it, which already worked. Copy and paste is unchanged.
+- If a dragged sticker still arrives wrong, the app's keyboard log (Data › Keyboard Log) lists what Keibord offered ("sticker drag: offers …"); send me those lines.
 
 Install `Keibord.ipa` with your signer (keep app groups for the app and the keyboards), SideStore with the Keibord source, or TestFlight (docs/INSTALL-NO-PC.md). Installing over an earlier version keeps your data.

@@ -590,7 +590,7 @@ extension EmojiPanelView {
 extension EmojiPanelView: UIDragInteractionDelegate {
     func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
         guard let cell = interaction.view as? StickerCell, let id = cell.stickerID,
-              let provider = StickerStore.shared.itemProvider(id) else { return [] }
+              let provider = StickerStore.shared.itemProvider(id, forDrag: true) else { return [] }
         KeyboardLog.shared.add("sticker drag: lifted")
         let item = UIDragItem(itemProvider: provider)
         item.localObject = id
