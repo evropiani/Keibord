@@ -579,7 +579,8 @@ UIKit (no SwiftUI in the extension — memory). Principal class `KeyboardViewCon
   (if any), the favourite emoji (`settings.favoriteEmoji`, at most 8, in their order), the recents
   (without the favourites), then the categories. It opens on the recents page (`showRecentsPage`);
   the stickers are to its left, like Apple's. Category bar at the bottom (`ABC` button, SF Symbol
-  icons: `photo.stack` for stickers, `clock` for favourites + recents, `face.smiling`, `pawprint`,
+  icons: Apple's sticker icon for stickers (a round sticker with its top right peeled over, drawn by
+  `KeyboardIcons.sticker`, fitted to a screenshot), `clock` for favourites + recents, `face.smiling`, `pawprint`,
   `fork.knife`, `soccerball`, `car`, `lightbulb`, `heart`, `flag`), backspace on the right. Long-press
   an emoji with variants → skin-tone picker. Tapping a sticker copies it (`StickerStore.copyToPasteboard`,
   needs Full Access; a keyboard cannot insert images) and a note says to paste it. Search field at the

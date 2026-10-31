@@ -72,6 +72,8 @@ final class EmojiPanelTests: XCTestCase {
         // ABC, stickers, the recents page, backspace.
         let bar = panel.subviews.compactMap { $0 as? UIStackView }.first { $0.axis == .horizontal }
         XCTAssertEqual(bar?.arrangedSubviews.count, 4)
+        XCTAssertEqual(EmojiCategory(id: "stickers", emojis: []).symbolName, KeyboardIcons.stickerSymbol, "Apple's sticker icon, drawn")
+        XCTAssertNotNil(EmojiPanelView.categoryIcon(KeyboardIcons.stickerSymbol))
         panel.showNote("Copied")
         XCTAssertEqual(panel.noteText, "Copied")
     }

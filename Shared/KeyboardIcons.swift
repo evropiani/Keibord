@@ -4,10 +4,13 @@ import UIKit
 enum KeyboardIcons {
     /// Apple's emoji key (iOS 26/27), drawn instead of the SF Symbol.
     static let emojiSymbol = "keibord.emoji"
+    /// Apple's sticker icon of the emoji keyboard's category bar (`EmojiCategory.symbolName` of the stickers).
+    static let stickerSymbol = "keibord.sticker"
 
     /// The icon of `name`: Keibord's own drawings, else the SF Symbol of that name.
     static func image(named name: String, pointSize: CGFloat, weight: UIImage.SymbolWeight, filled: Bool) -> UIImage? {
         if name == emojiSymbol { return emojiFace(diameter: pointSize, filled: filled) }
+        if name == stickerSymbol { return sticker(diameter: pointSize) }
         return UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: pointSize, weight: weight))
     }
 
@@ -72,6 +75,40 @@ enum KeyboardIcons {
         return image
         #else
         return UIImage(systemName: filled ? "face.smiling.inverse" : "face.smiling")
+        #endif
+    }
+
+    /// Apple's sticker icon: an outlined round sticker whose top right is peeled over (a straight fold
+    /// edge and a curved crease), fitted to a screenshot of iOS 26. A template image; `diameter` in points.
+    static func sticker(diameter: CGFloat) -> UIImage? {
+        let key = "sticker|\(diameter)"
+        if let cached = cache[key] { return cached }
+        #if os(iOS)
+        let side = ceil(diameter) + 2
+        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+            // The circle's centre line, so the outline's outer edge is `diameter` wide.
+            let r = diameter / 2 / 1.084
+            let c = CGPoint(x: side / 2, y: side / 2)
+            func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: c.x + x * r, y: c.y + y * r) }
+            let top: CGFloat = -108.3 * .pi / 180, right: CGFloat = 18.6 * .pi / 180
+            let path = UIBezierPath()
+            // The rest of the circle, from the right round the bottom and the left up to the top …
+            path.addArc(withCenter: c, radius: r, startAngle: right, endAngle: top + 2 * .pi, clockwise: true)
+            // … the straight edge of the peeled-over part back to the right …
+            path.addLine(to: p(cos(right), sin(right)))
+            // … and the crease, bulging towards the middle.
+            path.move(to: p(cos(top), sin(top)))
+            path.addCurve(to: p(cos(right), sin(right)), controlPoint1: p(-0.453, -0.497), controlPoint2: p(-0.013, 0.34))
+            path.lineWidth = 0.168 * r
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            UIColor.black.setStroke()
+            path.stroke()
+        }.withRenderingMode(.alwaysTemplate)
+        cache[key] = image
+        return image
+        #else
+        return UIImage(systemName: "circle")
         #endif
     }
 }

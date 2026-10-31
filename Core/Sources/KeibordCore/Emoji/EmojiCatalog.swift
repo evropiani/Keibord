@@ -12,7 +12,7 @@ public struct EmojiCategory: Hashable, Sendable {
     /// SF Symbol for the category bar.
     public var symbolName: String {
         switch id {
-        case "stickers": return "photo.stack" // the user's own stickers (`StickerIndex`)
+        case "stickers": return "keibord.sticker" // the user's own stickers: Apple's icon, drawn by the keyboard
         case "recents", "favorites": return "clock" // the favourites open the recents page
         case "smileys_people": return "face.smiling"
         case "animals_nature": return "pawprint"

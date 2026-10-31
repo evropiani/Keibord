@@ -316,7 +316,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         for (i, section) in sections.enumerated() where !(section.id == "recents" && i > 0 && sections[i - 1].id == "favorites") {
             let b = UIButton(type: .system)
             b.tag = i
-            b.setImage(UIImage(systemName: section.symbolName), for: .normal)
+            b.setImage(Self.categoryIcon(section.symbolName), for: .normal)
             b.tintColor = theme.secondaryLabel
             b.addTarget(self, action: #selector(categoryTapped(_:)), for: .touchUpInside)
             bottomBar.addArrangedSubview(b)
@@ -333,6 +333,11 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         note.backgroundColor = theme.colors.characterKey.uiColor
         note.textColor = theme.colors.label.uiColor
         updateCategoryHighlight()
+    }
+
+    /// SF Symbols, except Apple's sticker icon, which Keibord draws (17 pt like the symbols next to it).
+    static func categoryIcon(_ name: String) -> UIImage? {
+        name == KeyboardIcons.stickerSymbol ? KeyboardIcons.sticker(diameter: 17) : UIImage(systemName: name)
     }
 
     /// Opens on the recents page (the favourites first); the stickers are to its left, like Apple's.
